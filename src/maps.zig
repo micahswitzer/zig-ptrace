@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const MapEntry = struct {
+pub const MapEntry = struct {
     start: usize,
     end: usize,
     permissions: Permissions,
@@ -10,19 +10,19 @@ const MapEntry = struct {
     path: ?[]const u8,
 
     const Permissions = std.enums.EnumFieldStruct(enum {
-        Read,
-        Write,
-        Execute,
-        Private,
+        read,
+        write,
+        execute,
+        private,
     }, bool, false);
 
     fn parsePermissions(perms: []const u8) !Permissions {
         try std.testing.expectEqual(@as(usize, 4), perms.len);
         return Permissions{
-            .Read = perms[0] == 'r',
-            .Write = perms[1] == 'w',
-            .Execute = perms[2] == 'x',
-            .Private = perms[3] == 'p',
+            .read = perms[0] == 'r',
+            .write = perms[1] == 'w',
+            .execute = perms[2] == 'x',
+            .private = perms[3] == 'p',
         };
     }
 
@@ -41,7 +41,7 @@ const MapEntry = struct {
 
     const Self = @This();
 
-    inline fn getNext(comptime T: type, it: *T) ![]const u8 {
+    inline fn getNext(it: anytype) ![]const u8 {
         if (it.next()) |tok|
             return tok;
         return error.UnexpectedEOL;
@@ -50,11 +50,11 @@ const MapEntry = struct {
     /// Requires `line` to live as long as the returned `MapEntry`
     pub fn parse(line: []const u8) !Self {
         var it = std.mem.tokenize(u8, line, " ");
-        const addrTok = try getNext(@TypeOf(it), &it);
-        const permsTok = try getNext(@TypeOf(it), &it);
-        const offsetTok = try getNext(@TypeOf(it), &it);
-        const deviceTok = try getNext(@TypeOf(it), &it);
-        const inodeTok = try getNext(@TypeOf(it), &it);
+        const addrTok = try getNext(&it);
+        const permsTok = try getNext(&it);
+        const offsetTok = try getNext(&it);
+        const deviceTok = try getNext(&it);
+        const inodeTok = try getNext(&it);
         const path = it.next();
         var addrIt = std.mem.split(u8, addrTok, "-");
 
@@ -73,7 +73,7 @@ const MapEntry = struct {
         comptime if (!@hasDecl(T, "readUntilDelimiter"))
             @compileError("T must be of type std.io.Reader()");
         return struct {
-            reader: *T,
+            reader: T,
             pub fn next(self: *const @This()) !?Self {
                 var buf: [512]u8 = undefined;
                 const line = self.reader.readUntilDelimiter(&buf, '\n') catch |err| switch (err) {
@@ -86,20 +86,17 @@ const MapEntry = struct {
     }
 };
 
-fn IterFromReader(comptime Reader: type) type {
-    return MapEntry.Iterator(std.meta.Child(Reader));
-}
-
-pub fn iterator(reader: anytype) IterFromReader(@TypeOf(reader)) {
-    return IterFromReader(@TypeOf(reader)){
+pub fn iterator(reader: anytype) MapEntry.Iterator(@TypeOf(reader)) {
+    return .{
         .reader = reader,
     };
 }
 
 test "parse system maps" {
-    const file = try std.fs.cwd().openFile("/proc/self/maps", .{ .read = true });
+    const file = try std.fs.cwd().openFile("/proc/self/maps", .{});
+    defer file.close();
     var reader = file.reader();
-    const iter = iterator(&reader);
+    const iter = iterator(reader);
     while (try iter.next()) |entry| {
         _ = entry;
     }
@@ -110,7 +107,7 @@ test "parse line with path" {
     const expected = MapEntry{
         .start = 0x56523759d000,
         .end = 0x5652375bd000,
-        .permissions = .{ .Read = true, .Private = true },
+        .permissions = .{ .read = true, .private = true },
         .offset = 0,
         .device = .{ .major = 103, .minor = 5 },
         .inode = 2361465,
@@ -125,7 +122,7 @@ test "parse line without path" {
     const expected = MapEntry{
         .start = 0x56523759d000,
         .end = 0x5652375bd000,
-        .permissions = .{ .Read = true, .Execute = true, .Private = true },
+        .permissions = .{ .read = true, .execute = true, .private = true },
         .offset = 0,
         .device = .{ .major = 103, .minor = 5 },
         .inode = 2361465,

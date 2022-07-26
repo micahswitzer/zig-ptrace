@@ -71,7 +71,11 @@ inline fn ptrace1(request: usize) usize {
 }
 
 inline fn ptrace2(request: usize, pid: Pid) usize {
-    return linux.syscall2(.ptrace, request, @bitCast(usize, @as(isize, pid)));
+    return linux.syscall2(.ptrace, request, pid2arg(pid));
+}
+
+inline fn ptrace4(request: usize, pid: Pid, addr: usize, data: usize) usize {
+    return linux.syscall4(.ptrace, request, pid2arg(pid), addr, data);
 }
 
 inline fn pid2arg(pid: Pid) usize {
@@ -87,29 +91,12 @@ pub fn traceMe() PtraceError!void {
     }
 }
 
+/// TODO: this is straight up wrong
 pub fn peekText(pid: Pid, addr: usize) PtraceError!usize {
     var res: usize = undefined;
     const rc = linux.syscall4(.ptrace, PTRACE_PEEKTEXT, pid2arg(pid), addr, @ptrToInt(&res));
     switch (os.errno(rc)) {
         .SUCCESS => return res,
-        .PERM => return error.NotPermitted,
-        else => |err| return os.unexpectedErrno(err),
-    }
-}
-
-pub fn cont(pid: Pid, sig: u32) PtraceError!void {
-    const rc = linux.syscall4(.ptrace, PTRACE_CONT, pid2arg(pid), undefined, sig);
-    switch (os.errno(rc)) {
-        .SUCCESS => return,
-        .PERM => return error.NotPermitted,
-        else => |err| return os.unexpectedErrno(err),
-    }
-}
-
-pub fn attach(pid: Pid) PtraceError!void {
-    const rc = ptrace2(PTRACE_ATTACH, pid);
-    switch (os.errno(rc)) {
-        .SUCCESS => return,
         .PERM => return error.NotPermitted,
         else => |err| return os.unexpectedErrno(err),
     }
@@ -130,6 +117,49 @@ pub fn setRegs(pid: Pid, user_regs: *const UserRegs) PtraceError!void {
         .SUCCESS => return,
         .PERM => return error.NotPermitted,
         else => |err| return os.unexpectedErrno(err),
+    }
+}
+
+pub fn getSigInfo(pid: Pid) PtraceError!linux.siginfo_t {
+    var siginfo: linux.siginfo_t = undefined;
+    const rc = linux.syscall4(.ptrace, PTRACE_GETSIGINFO, pid2arg(pid), undefined, @ptrToInt(&siginfo));
+    switch (os.errno(rc)) {
+        .SUCCESS => return siginfo,
+        else => |err| return os.unexpectedErrno(err),
+    }
+}
+
+pub const RestartError = error{
+    NoSuchProcess,
+    InvalidSignal,
+};
+
+pub fn cont(pid: Pid, sig: u32) RestartError!void {
+    const rc = ptrace4(PTRACE_CONT, pid, undefined, sig);
+    switch (os.errno(rc)) {
+        .SUCCESS => return,
+        .SRCH => return error.NoSuchProcess,
+        .IO => return error.InvalidSignal,
+        else => unreachable,
+    }
+}
+
+pub fn attach(pid: Pid) PtraceError!void {
+    const rc = ptrace2(PTRACE_ATTACH, pid);
+    switch (os.errno(rc)) {
+        .SUCCESS => return,
+        .PERM => return error.NotPermitted,
+        else => |err| return os.unexpectedErrno(err),
+    }
+}
+
+pub fn detach(pid: Pid, sig: u32) RestartError!void {
+    const rc = ptrace4(PTRACE_DETACH, pid, undefined, sig);
+    switch (os.errno(rc)) {
+        .SUCCESS => return,
+        .SRCH => return error.NoSuchProcess,
+        .IO => return error.InvalidSignal,
+        else => unreachable,
     }
 }
 

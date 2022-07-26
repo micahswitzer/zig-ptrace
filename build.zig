@@ -5,11 +5,22 @@ pub fn build(b: *std.build.Builder) void {
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
     const mode = b.standardReleaseOptions();
 
-    const exe = b.addExecutable("injector", "src/main.zig");
-    exe.setBuildMode(mode);
-    exe.install();
+    const tracer = b.addExecutable("tracer", "src/tracer.zig");
+    tracer.setBuildMode(mode);
+    tracer.install();
 
-    const main_tests = b.addTest("src/main.zig");
+    const tracee = b.addExecutable("tracee", "src/tracee.zig");
+    tracee.setBuildMode(mode);
+    tracee.install();
+
+    const runner_step = std.build.RunStep.create(b, "run tracer");
+    runner_step.addArtifactArg(tracer);
+    runner_step.addArtifactArg(tracee);
+
+    const run_step = b.step("run", "Run the tracer program");
+    run_step.dependOn(&runner_step.step);
+
+    const main_tests = b.addTest("src/highlevel.zig");
     main_tests.setBuildMode(mode);
 
     const test_step = b.step("test", "Run library tests");
