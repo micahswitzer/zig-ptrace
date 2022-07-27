@@ -21,3 +21,15 @@ pub fn replaceBasename(buffer: []u8, original: []const u8, replacement: []const 
     buffer[new_len] = 0;
     return std.meta.assumeSentinel(buffer[0..new_len], 0);
 }
+
+pub fn arrayInit(comptime T: type, val: @typeInfo(T).Array.child) T {
+    var arr: T = undefined;
+    inline for (arr) |*el| {
+        el.* = val;
+    }
+    return arr;
+}
+
+pub fn HomoTuple(comptime T: type, comptime val: @typeInfo(T).Array.child) type {
+    return std.meta.Tuple(&arrayInit(T, val));
+}

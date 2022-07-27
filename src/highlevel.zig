@@ -1,10 +1,9 @@
-const builtin = @import("builtin");
 const std = @import("std");
 const pt = @import("ptrace.zig");
-const proc = @import("proc.zig");
-const maps = @import("maps.zig");
+
+// type aliases
 const Pid = pt.Pid;
-const UserRegs = @import("userregs.zig").UserRegs;
+const UserRegs = pt.UserRegs;
 
 pub const Thread = struct {
     tid: Pid,
