@@ -95,7 +95,7 @@ pub const Thread = struct {
                     }
                 };
             },
-            // this function is internal and must be used when we *know* the proces is stopped
+            // this function is internal and must be used when we *know* the process is stopped
             else => unreachable,
         }
         self.state = switch (action) {
@@ -192,7 +192,7 @@ pub const Thread = struct {
 };
 
 fn spawnee(prog: [*:0]const u8, traceme: bool, stop: bool) !void {
-    // TODO: figure out how to handle errors from these fuctions
+    // TODO: figure out how to handle errors from these functions
     if (traceme)
         try pt.traceMe();
 

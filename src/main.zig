@@ -1,7 +1,3 @@
-//const std = @import("std");
-//const testing = std.testing;
-const ptrace = @import("ptrace.zig");
-
-pub fn main() anyerror!void {
-    try ptrace.traceMe();
-}
+// this is the API exposed to consumers of this package
+pub const PTRACE = @import("ptrace.zig");
+pub usingnamespace @import("highlevel.zig");
