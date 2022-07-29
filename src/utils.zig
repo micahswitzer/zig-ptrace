@@ -30,6 +30,8 @@ pub fn arrayInit(comptime T: type, val: @typeInfo(T).Array.child) T {
     return arr;
 }
 
-pub fn HomoTuple(comptime T: type, comptime val: @typeInfo(T).Array.child) type {
+/// For an array type `T`, create an equivalent tuple
+/// with each element initialized with value `val`.
+pub fn UniformTuple(comptime T: type, comptime val: @typeInfo(T).Array.child) type {
     return std.meta.Tuple(&arrayInit(T, val));
 }

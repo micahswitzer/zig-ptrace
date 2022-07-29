@@ -1,6 +1,6 @@
 const builtin = @import("builtin");
 const utils = @import("../utils.zig");
-const Args = utils.HomoTuple([6]type, usize);
+const Args = utils.UniformTuple([6]type, usize);
 
 // x86-specific constants
 pub const GETREGS = 12;
