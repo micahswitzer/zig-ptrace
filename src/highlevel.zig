@@ -1,7 +1,8 @@
 const std = @import("std");
 const pt = @import("ptrace.zig");
 
-// type aliases
+const linux = std.os.linux;
+const os = std.os;
 const Pid = pt.Pid;
 const UserRegs = pt.UserRegs;
 
@@ -28,12 +29,12 @@ pub const Thread = struct {
         Detached,
 
         pub fn fromCode(code: u32) State {
-            if (std.os.W.IFSTOPPED(code))
-                return State{ .Stopped = std.os.W.STOPSIG(code) };
-            if (std.os.W.IFSIGNALED(code))
-                return State{ .Terminated = std.os.W.TERMSIG(code) };
-            if (std.os.W.IFEXITED(code))
-                return State{ .Exited = std.os.W.EXITSTATUS(code) };
+            if (os.W.IFSTOPPED(code))
+                return State{ .Stopped = os.W.STOPSIG(code) };
+            if (os.W.IFSIGNALED(code))
+                return State{ .Terminated = os.W.TERMSIG(code) };
+            if (os.W.IFEXITED(code))
+                return State{ .Exited = os.W.EXITSTATUS(code) };
             unreachable;
         }
     };
@@ -47,8 +48,8 @@ pub const Thread = struct {
 
     fn handleSignal(self: *Self, signal: Signal) void {
         self.inject = switch (signal) {
-            std.os.SIG.STOP => 0,
-            std.os.SIG.TRAP => 0,
+            os.SIG.STOP => 0,
+            os.SIG.TRAP => 0,
             else => signal,
         };
     }
@@ -61,7 +62,7 @@ pub const Thread = struct {
             .Stopped => |sig| return sig,
             else => {},
         }
-        const res = std.os.waitpid(self.tid, 0);
+        const res = os.waitpid(self.tid, 0);
         std.debug.assert(res.pid == self.tid);
         self.state = State.fromCode(res.status);
         switch (self.state) {
@@ -119,7 +120,7 @@ pub const Thread = struct {
 
     /// Wait until the thread stops due to a SIGSTOP
     pub fn waitStoppedStop(self: *Self) !void {
-        try self.waitStoppedSig(std.os.SIG.STOP);
+        try self.waitStoppedSig(os.SIG.STOP);
     }
 
     /// Wait until the thread stops due to the specified signal
@@ -138,7 +139,7 @@ pub const Thread = struct {
             return error.NotRunning;
 
         // we must politely ask it to stop
-        const errno = std.os.linux.getErrno(std.os.linux.tgkill(self.pid, self.tid, std.os.SIG.STOP));
+        const errno = linux.getErrno(linux.tgkill(self.pid, self.tid, os.SIG.STOP));
         switch (errno) {
             .SUCCESS => try self.waitStoppedStop(),
             .SRCH => {
@@ -197,16 +198,16 @@ fn spawnee(prog: [*:0]const u8, traceme: bool, stop: bool) !void {
         try pt.traceMe();
 
     if (stop)
-        try std.os.raise(std.os.SIG.STOP);
+        try os.raise(os.SIG.STOP);
 
-    return std.os.execveZ(prog, &[_:null]?[*:0]const u8{ prog, null }, &[_:null]?[*:0]const u8{null});
+    return os.execveZ(prog, &[_:null]?[*:0]const u8{ prog, null }, &[_:null]?[*:0]const u8{null});
 }
 
 fn spawn(prog: [*:0]const u8, traceme: bool, stop: bool) !Pid {
-    const pid = try std.os.fork();
+    const pid = try os.fork();
     if (pid == 0)
         // the child process can't return errors, so we abort here
-        spawnee(prog, traceme, stop) catch std.os.abort();
+        spawnee(prog, traceme, stop) catch os.abort();
     return pid;
 }
 
@@ -216,9 +217,9 @@ test {
 
 test "thread create and wait" {
     var thread = try Thread.attachSpawned("/bin/ls");
-    try std.testing.expectEqual(Thread.State{ .Stopped = std.os.SIG.STOP }, thread.state);
+    try std.testing.expectEqual(Thread.State{ .Stopped = os.SIG.STOP }, thread.state);
     try thread.cont();
-    try thread.waitStoppedSig(std.os.SIG.TRAP);
-    try std.testing.expectEqual(Thread.State{ .Stopped = std.os.SIG.TRAP }, thread.state);
+    try thread.waitStoppedSig(os.SIG.TRAP);
+    try std.testing.expectEqual(Thread.State{ .Stopped = os.SIG.TRAP }, thread.state);
     try thread.detach();
 }

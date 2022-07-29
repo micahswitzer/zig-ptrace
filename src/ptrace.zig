@@ -1,6 +1,7 @@
 const builtin = @import("builtin");
 const std = @import("std");
-const os = std.os.linux;
+const linux = std.os.linux;
+const os = std.os;
 
 comptime {
     if (builtin.os.tag != .linux) @compileError("zig-ptrace only supports Linux");
@@ -141,18 +142,18 @@ pub const PtraceError = error{
     NotTraced, // ESRCH
 } || std.os.UnexpectedError;
 
-pub const Pid = os.pid_t;
+pub const Pid = linux.pid_t;
 
 inline fn ptrace1(request: usize) usize {
-    return os.syscall1(.ptrace, request);
+    return linux.syscall1(.ptrace, request);
 }
 
 inline fn ptrace2(request: usize, pid: Pid) usize {
-    return os.syscall2(.ptrace, request, pid2arg(pid));
+    return linux.syscall2(.ptrace, request, pid2arg(pid));
 }
 
 inline fn ptrace4(request: usize, pid: Pid, addr: usize, data: usize) usize {
-    return os.syscall4(.ptrace, request, pid2arg(pid), addr, data);
+    return linux.syscall4(.ptrace, request, pid2arg(pid), addr, data);
 }
 
 inline fn pid2arg(pid: Pid) usize {
@@ -161,7 +162,7 @@ inline fn pid2arg(pid: Pid) usize {
 
 pub fn traceMe() PtraceError!void {
     const rc = ptrace1(TRACEME);
-    switch (os.getErrno(rc)) {
+    switch (linux.getErrno(rc)) {
         .SUCCESS => return,
         .PERM => return error.NotPermitted,
         else => |err| return std.os.unexpectedErrno(err),
@@ -172,7 +173,7 @@ pub fn traceMe() PtraceError!void {
 pub fn peekText(pid: Pid, addr: usize) PtraceError!usize {
     var res: usize = undefined;
     const rc = ptrace4(PEEKTEXT, pid, addr, @ptrToInt(&res));
-    switch (os.getErrno(rc)) {
+    switch (linux.getErrno(rc)) {
         .SUCCESS => return res,
         .PERM => return error.NotPermitted,
         else => |err| return std.os.unexpectedErrno(err),
@@ -190,7 +191,7 @@ pub usingnamespace if (@hasDecl(Arch, "GETREGS")) struct {
             comptime if (builtin.cpu.arch.isSPARC()) regs_ptr else undefined,
             comptime if (!builtin.cpu.arch.isSPARC()) regs_ptr else undefined,
         );
-        switch (os.getErrno(rc)) {
+        switch (linux.getErrno(rc)) {
             .SUCCESS => return user_regs,
             .SRCH => return error.NoSuchProcess,
             // we guarentee all of the required invariants are upheld to prevent these errors
@@ -207,25 +208,34 @@ pub usingnamespace if (@hasDecl(Arch, "GETREGS")) struct {
 
 pub fn setRegs(pid: Pid, user_regs: Arch.UserRegs) PtraceError!void {
     const rc = ptrace4(Arch.SETREGS, pid, undefined, @ptrToInt(&user_regs));
-    switch (os.getErrno(rc)) {
+    switch (linux.getErrno(rc)) {
         .SUCCESS => return,
         .PERM => return error.NotPermitted,
         else => |err| return std.os.unexpectedErrno(err),
     }
 }
 
-pub fn getSigInfo(pid: Pid) PtraceError!os.siginfo_t {
-    var siginfo: os.siginfo_t = undefined;
+pub fn getSigInfo(pid: Pid) PtraceError!linux.siginfo_t {
+    var siginfo: linux.siginfo_t = undefined;
     const rc = ptrace4(GETSIGINFO, pid, undefined, @ptrToInt(&siginfo));
-    switch (os.getErrno(rc)) {
+    switch (linux.getErrno(rc)) {
         .SUCCESS => return siginfo,
         else => |err| return std.os.unexpectedErrno(err),
     }
 }
 
+pub fn setOptions(pid: Pid, options: usize) PtraceError!void {
+    switch (linux.getErrno(ptrace4(SETOPTIONS, pid, undefined, options))) {
+        .SUCCESS => return,
+        .INVAL => return error.InvalidOption,
+        .SRCH => return error.NoSuchProcess,
+        else => unreachable,
+    }
+}
+
 pub fn cont(pid: Pid, sig: u32) RestartError!void {
     const rc = ptrace4(CONT, pid, undefined, sig);
-    switch (os.getErrno(rc)) {
+    switch (linux.getErrno(rc)) {
         .SUCCESS => return,
         .SRCH => return error.NoSuchProcess,
         .IO => return error.InvalidSignal,
@@ -235,7 +245,7 @@ pub fn cont(pid: Pid, sig: u32) RestartError!void {
 
 pub fn attach(pid: Pid) PtraceError!void {
     const rc = ptrace2(ATTACH, pid);
-    switch (os.getErrno(rc)) {
+    switch (linux.getErrno(rc)) {
         .SUCCESS => return,
         .PERM => return error.NotPermitted,
         else => |err| return std.os.unexpectedErrno(err),
@@ -244,7 +254,7 @@ pub fn attach(pid: Pid) PtraceError!void {
 
 pub fn detach(pid: Pid, sig: u32) RestartError!void {
     const rc = ptrace4(DETACH, pid, undefined, sig);
-    switch (os.getErrno(rc)) {
+    switch (linux.getErrno(rc)) {
         .SUCCESS => return,
         .SRCH => return error.NoSuchProcess,
         .IO => return error.InvalidSignal,
