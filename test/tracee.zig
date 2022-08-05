@@ -1,5 +1,5 @@
 const std = @import("std");
-const print = @import("utils.zig").makePrefixedPrint("c");
+const print = @import("utils").makePrefixedPrint("c");
 
 pub fn main() void {
     print("Going to sleep...", .{});

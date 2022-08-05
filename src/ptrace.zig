@@ -123,6 +123,8 @@ pub const O = struct {
 
     pub const MASK = 0xff | EXITKILL | SUSPEND_SECCOMP;
 };
+/// can potentially allow for more efficient storage of
+pub const Options = std.math.IntFittingRange(0, O.MASK);
 
 pub const NoSuchProcessError = error{NoSuchProcess};
 
@@ -142,7 +144,11 @@ pub const PtraceError = error{
     NotTraced, // ESRCH
 } || std.os.UnexpectedError;
 
+// currently we depend on std.os.linux's definition of these,
+// we having these here makes it easy to change that in the future
 pub const Pid = linux.pid_t;
+pub const SigInfo = linux.siginfo_t;
+pub const Signal = u32;
 
 inline fn ptrace1(request: usize) usize {
     return linux.syscall1(.ptrace, request);
@@ -194,7 +200,7 @@ pub usingnamespace if (@hasDecl(Arch, "GETREGS")) struct {
         switch (linux.getErrno(rc)) {
             .SUCCESS => return user_regs,
             .SRCH => return error.NoSuchProcess,
-            // we guarentee all of the required invariants are upheld to prevent these errors
+            // we guarantee all of the required invariants are upheld to prevent these errors
             .FAULT => unreachable,
             .IO => unreachable,
             .PERM => unreachable,
@@ -215,8 +221,8 @@ pub fn setRegs(pid: Pid, user_regs: Arch.UserRegs) PtraceError!void {
     }
 }
 
-pub fn getSigInfo(pid: Pid) PtraceError!linux.siginfo_t {
-    var siginfo: linux.siginfo_t = undefined;
+pub fn getSigInfo(pid: Pid) PtraceError!SigInfo {
+    var siginfo: SigInfo = undefined;
     const rc = ptrace4(GETSIGINFO, pid, undefined, @ptrToInt(&siginfo));
     switch (linux.getErrno(rc)) {
         .SUCCESS => return siginfo,
@@ -224,8 +230,8 @@ pub fn getSigInfo(pid: Pid) PtraceError!linux.siginfo_t {
     }
 }
 
-pub fn setOptions(pid: Pid, options: usize) PtraceError!void {
-    switch (linux.getErrno(ptrace4(SETOPTIONS, pid, undefined, options))) {
+pub fn setOptions(pid: Pid, options: Options) PtraceError!void {
+    switch (linux.getErrno(ptrace4(SETOPTIONS, pid, undefined, @intCast(usize, options)))) {
         .SUCCESS => return,
         .INVAL => return error.InvalidOption,
         .SRCH => return error.NoSuchProcess,
@@ -233,7 +239,7 @@ pub fn setOptions(pid: Pid, options: usize) PtraceError!void {
     }
 }
 
-pub fn cont(pid: Pid, sig: u32) RestartError!void {
+pub fn cont(pid: Pid, sig: Signal) RestartError!void {
     const rc = ptrace4(CONT, pid, undefined, sig);
     switch (linux.getErrno(rc)) {
         .SUCCESS => return,
@@ -252,7 +258,7 @@ pub fn attach(pid: Pid) PtraceError!void {
     }
 }
 
-pub fn detach(pid: Pid, sig: u32) RestartError!void {
+pub fn detach(pid: Pid, sig: Signal) RestartError!void {
     const rc = ptrace4(DETACH, pid, undefined, sig);
     switch (linux.getErrno(rc)) {
         .SUCCESS => return,

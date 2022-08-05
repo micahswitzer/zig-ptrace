@@ -1,43 +1,26 @@
 const std = @import("std");
 const pt = @import("ptrace.zig");
+const ll = @import("lowlevel.zig");
 
 const linux = std.os.linux;
 const os = std.os;
+
+const Options = pt.Options;
 const Pid = pt.Pid;
+const Signal = pt.Signal;
 const UserRegs = pt.UserRegs;
 
-pub const Thread = struct {
-    tid: Pid,
-    pid: Pid,
-    state: State,
+const Thread = ll.Thread;
+
+pub const ManagedThread = struct {
+    thread: Thread,
+    group_id: Pid,
     /// The signal to inject into the thread on the next restart
     inject: Signal = 0,
     regs: UserRegs = undefined,
+    options: pt.Options = 0,
 
     const Self = @This();
-
-    const Signal = u32;
-
-    pub const State = union(enum) {
-        Stopped: Signal,
-        Terminated: Signal,
-        Exited: u8,
-        Running,
-        /// The thread has already been cleaned up and no exit information exists for it
-        Gone,
-        /// The thread has been detached from its tracer (us)
-        Detached,
-
-        pub fn fromCode(code: u32) State {
-            if (os.W.IFSTOPPED(code))
-                return State{ .Stopped = os.W.STOPSIG(code) };
-            if (os.W.IFSIGNALED(code))
-                return State{ .Terminated = os.W.TERMSIG(code) };
-            if (os.W.IFEXITED(code))
-                return State{ .Exited = os.W.EXITSTATUS(code) };
-            unreachable;
-        }
-    };
 
     pub fn isAttached(self: Self) bool {
         return switch (self.state) {
@@ -64,7 +47,7 @@ pub const Thread = struct {
         }
         const res = os.waitpid(self.tid, 0);
         std.debug.assert(res.pid == self.tid);
-        self.state = State.fromCode(res.status);
+        //self.state = State.fromCode(res.status);
         switch (self.state) {
             .Stopped => |sig| {
                 self.handleSignal(sig);
@@ -154,6 +137,12 @@ pub const Thread = struct {
         }
     }
 
+    fn setOptions(self: *@This(), options: pt.Options) !void {
+        try self.isValidTo(&pt.setOptions);
+        try pt.setOptions(self.tid, options);
+        self.options = options;
+    }
+
     pub fn attachPid(pid: Pid) !Self {
         try pt.attach(pid);
         return Self{
@@ -173,6 +162,9 @@ pub const Thread = struct {
         // TODO: we know that an exec will occur as well so we should probably
         // synchronize until just after that happens?
         try thread.waitStoppedStop();
+
+        // stopping first allows use to set options before the exec occurs
+
         return thread;
     }
 
