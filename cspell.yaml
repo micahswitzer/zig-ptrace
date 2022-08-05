@@ -1,8 +1,16 @@
 version: "0.2"
 ignorePaths:
-  - ".cspell/*"
+  - .cspell/*
 dictionaryDefinitions:
   - name: ptrace
     path: ./.cspell/ptrace.txt
+  - name: zig
+    path: ./.cspell/zig.txt
 dictionaries:
   - ptrace
+enableFiletypes:
+  - zig
+overrides:
+  - filename: "**/*.zig"
+    dictionaries:
+      - zig

@@ -1,0 +1,13 @@
+anyerror
+anyopaque
+anytype
+comptime
+enum
+errdefer
+int
+isize
+orelse
+struct
+threadlocal
+usingnamespace
+usize

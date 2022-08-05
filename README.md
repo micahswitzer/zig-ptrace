@@ -15,7 +15,7 @@ add the following code to your `build.zig`:
 ```zig
 const zig_ptrace = std.build.Pkg{
     .name = "ptrace",
-    .path = .{ .path = "deps/zig-ptrace/src/main.zig" },
+    .source = .{ .path = "deps/zig-ptrace/src/main.zig" },
 };
 
 exe.addPackage(zig_ptrace);
