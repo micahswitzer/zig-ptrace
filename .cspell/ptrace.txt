@@ -69,6 +69,7 @@ Tgid
 tgkill
 traceclone
 tracee
+TRACEEXEC
 TRACEEXIT
 TRACEFORK
 traceme

@@ -23,10 +23,7 @@ pub const ManagedThread = struct {
     const Self = @This();
 
     pub fn isAttached(self: Self) bool {
-        return switch (self.state) {
-            .Stopped, .Running => true,
-            .Exited, .Terminated, .Gone, .Detached => false,
-        };
+        return self.thread.isAttached();
     }
 
     fn handleSignal(self: *Self, signal: Signal) void {
@@ -39,8 +36,6 @@ pub const ManagedThread = struct {
 
     /// Wait until the thread is stopped by a signal
     pub fn waitStopped(self: *Self) !Signal {
-        // TODO: should this be an error? we expected to be running?
-        // I think no, this acts as a synchronization of sorts. don't care going in, stopped going out
         switch (self.state) {
             .Stopped => |sig| return sig,
             else => {},
@@ -137,10 +132,16 @@ pub const ManagedThread = struct {
         }
     }
 
+    fn updateOptions(self: *@This(), options: pt.Options) !void {
+        if (options == self.options)
+            return try self.thread.setOptions(options);
+        self.options == options;
+    }
     fn setOptions(self: *@This(), options: pt.Options) !void {
-        try self.isValidTo(&pt.setOptions);
-        try pt.setOptions(self.tid, options);
-        self.options = options;
+        try self.updateOptions(self.options | options);
+    }
+    fn clearOptions(self: *@This(), options: pt.Options) !void {
+        try self.updateOptions(self.options & ~options);
     }
 
     pub fn attachPid(pid: Pid) !Self {
@@ -201,17 +202,4 @@ fn spawn(prog: [*:0]const u8, traceme: bool, stop: bool) !Pid {
         // the child process can't return errors, so we abort here
         spawnee(prog, traceme, stop) catch os.abort();
     return pid;
-}
-
-test {
-    _ = pt;
-}
-
-test "thread create and wait" {
-    var thread = try Thread.attachSpawned("/bin/ls");
-    try std.testing.expectEqual(Thread.State{ .Stopped = os.SIG.STOP }, thread.state);
-    try thread.cont();
-    try thread.waitStoppedSig(os.SIG.TRAP);
-    try std.testing.expectEqual(Thread.State{ .Stopped = os.SIG.TRAP }, thread.state);
-    try thread.detach();
 }

@@ -246,12 +246,12 @@ fn spawnee(prog: [*:0]const u8) anyerror {
     return os.execveZ(prog, &[_:null]?[*:0]const u8{ prog, null }, &[_:null]?[*:0]const u8{null});
 }
 
-pub fn spawnTraced(prog: [*:0]const u8) !Pid {
+pub fn spawnTraced(prog: [*:0]const u8) !Thread {
     const pid = try os.fork();
     if (pid == 0)
         // the child process can't return errors, so we abort here
         spawnee(prog) catch os.abort();
-    return pid;
+    return threadFromTraceme(pid);
 }
 
 pub fn traceMeAndStop() !void {
@@ -269,12 +269,23 @@ pub fn attachThread(tid: Pid) !Thread {
     return thread;
 }
 
-pub fn attachThreadStopped(tid: Pid) !Thread {
-    var thread = attachThread(tid);
-    try thread.waitForSignal(linux.SIG.STOP);
+/// WARNING: this doesn't guarantee *which* signal the thread is stopped on
+pub fn attachThreadSignaled(tid: Pid) !Thread {
+    var thread = try attachThread(tid);
+    _ = try thread.waitSignaled();
     return thread;
 }
 
 pub fn signalToString(sig: Signal) []const u8 {
     return util.intDeclToString(linux.SIG, sig) orelse "UNKNOWN";
+}
+
+test "thread create and wait" {
+    var thread = try spawnTraced("/bin/ls");
+    _ = try thread.waitSignaled();
+    try std.testing.expectEqual(Thread.State{ .Stopped = linux.SIG.STOP }, thread.state);
+    try thread.cont(0);
+    _ = try thread.waitSignaled();
+    try std.testing.expectEqual(Thread.State{ .Stopped = linux.SIG.TRAP }, thread.state);
+    try thread.detach(0);
 }

@@ -113,6 +113,7 @@ pub const O = struct {
     pub const TRACEFORK = 1 << EVENT.FORK;
     pub const TRACEVFORK = 1 << EVENT.VFORK;
     pub const TRACECLONE = 1 << EVENT.CLONE;
+    pub const TRACEEXEC = 1 << EVENT.EXEC;
     pub const TRACEVFORKDONE = 1 << EVENT.VFORK_DONE;
     pub const TRACEEXIT = 1 << EVENT.EXIT;
     pub const TRACESECCOMP = 1 << EVENT.SECCOMP;
@@ -123,7 +124,7 @@ pub const O = struct {
 
     pub const MASK = 0xff | EXITKILL | SUSPEND_SECCOMP;
 };
-/// can potentially allow for more efficient storage of
+/// can potentially allow for more efficient storage
 pub const Options = std.math.IntFittingRange(0, O.MASK);
 
 pub const NoSuchProcessError = error{NoSuchProcess};
@@ -133,6 +134,7 @@ pub const RestartError = error{
     InvalidSignal,
 };
 
+// all possible errors
 pub const PtraceError = error{
     RegisterAlloc, // EBUSY on i386
     InvalidMemArea, // EFAULT or EIO
@@ -140,9 +142,7 @@ pub const PtraceError = error{
     InvalidSignal, // EIO
     NotPermitted, // EPERM
     NoSuchProcess, // ESRCH
-    NotStopped, // ESRCH
-    NotTraced, // ESRCH
-} || std.os.UnexpectedError;
+};
 
 // currently we depend on std.os.linux's definition of these,
 // we having these here makes it easy to change that in the future
@@ -166,23 +166,25 @@ inline fn pid2arg(pid: Pid) usize {
     return @bitCast(usize, @as(isize, pid));
 }
 
-pub fn traceMe() PtraceError!void {
+pub const TraceMeError = error{NotPermitted};
+pub fn traceMe() TraceMeError!void {
     const rc = ptrace1(TRACEME);
     switch (linux.getErrno(rc)) {
         .SUCCESS => return,
-        .PERM => return error.NotPermitted,
-        else => |err| return std.os.unexpectedErrno(err),
+        .PERM => return error.NotPermitted, // the calling thread is already being traced
+        else => unreachable,
     }
 }
 
-/// TODO: this is straight up wrong
-pub fn peekText(pid: Pid, addr: usize) PtraceError!usize {
+const MemoryOperationError = error{ InvalidMemArea, NoSuchProcess };
+pub fn peekText(pid: Pid, addr: usize) MemoryOperationError!usize {
     var res: usize = undefined;
     const rc = ptrace4(PEEKTEXT, pid, addr, @ptrToInt(&res));
     switch (linux.getErrno(rc)) {
         .SUCCESS => return res,
-        .PERM => return error.NotPermitted,
-        else => |err| return std.os.unexpectedErrno(err),
+        .FAULT, .IO => return error.InvalidMemArea,
+        .SRCH => return error.NoSuchProcess,
+        else => unreachable,
     }
 }
 
@@ -200,37 +202,39 @@ pub usingnamespace if (@hasDecl(Arch, "GETREGS")) struct {
         switch (linux.getErrno(rc)) {
             .SUCCESS => return user_regs,
             .SRCH => return error.NoSuchProcess,
-            // we guarantee all of the required invariants are upheld to prevent these errors
-            .FAULT => unreachable,
-            .IO => unreachable,
-            .PERM => unreachable,
             else => unreachable,
         }
     }
-} else struct {
-    // this error prevents @hasDecl() from being useful...
-    //pub const getRegs = @compileError("PTRACE_GETREGS is not available on " ++ @tagName(builtin.cpu.arch));
-};
+} else struct {};
 
-pub fn setRegs(pid: Pid, user_regs: Arch.UserRegs) PtraceError!void {
-    const rc = ptrace4(Arch.SETREGS, pid, undefined, @ptrToInt(&user_regs));
-    switch (linux.getErrno(rc)) {
-        .SUCCESS => return,
-        .PERM => return error.NotPermitted,
-        else => |err| return std.os.unexpectedErrno(err),
+pub usingnamespace if (@hasDecl(Arch, "SETREGS")) struct {
+    pub fn setRegs(pid: Pid, user_regs: Arch.UserRegs) NoSuchProcessError!void {
+        const rc = ptrace4(
+            Arch.SETREGS,
+            pid,
+            comptime if (builtin.cpu.arch.isSPARC()) @ptrToInt(&user_regs) else undefined,
+            comptime if (!builtin.cpu.arch.isSPARC()) @ptrToInt(&user_regs) else undefined,
+        );
+        switch (linux.getErrno(rc)) {
+            .SUCCESS => return,
+            .SRCH => return error.NoSuchProcess,
+            else => unreachable,
+        }
     }
-}
+} else struct {};
 
-pub fn getSigInfo(pid: Pid) PtraceError!SigInfo {
+pub fn getSigInfo(pid: Pid) NoSuchProcessError!SigInfo {
     var siginfo: SigInfo = undefined;
     const rc = ptrace4(GETSIGINFO, pid, undefined, @ptrToInt(&siginfo));
     switch (linux.getErrno(rc)) {
         .SUCCESS => return siginfo,
-        else => |err| return std.os.unexpectedErrno(err),
+        .SRCH => return error.NoSuchProcess,
+        else => unreachable,
     }
 }
 
-pub fn setOptions(pid: Pid, options: Options) PtraceError!void {
+pub const SetOptionsError = error{ InvalidOption, NoSuchProcess };
+pub fn setOptions(pid: Pid, options: Options) SetOptionsError!void {
     switch (linux.getErrno(ptrace4(SETOPTIONS, pid, undefined, @intCast(usize, options)))) {
         .SUCCESS => return,
         .INVAL => return error.InvalidOption,
@@ -243,18 +247,32 @@ pub fn cont(pid: Pid, sig: Signal) RestartError!void {
     const rc = ptrace4(CONT, pid, undefined, sig);
     switch (linux.getErrno(rc)) {
         .SUCCESS => return,
-        .SRCH => return error.NoSuchProcess,
         .IO => return error.InvalidSignal,
+        .SRCH => return error.NoSuchProcess,
         else => unreachable,
     }
 }
 
-pub fn attach(pid: Pid) PtraceError!void {
+pub const AttachError = error{ NotPermitted, NoSuchProcess };
+pub fn attach(pid: Pid) AttachError!void {
     const rc = ptrace2(ATTACH, pid);
     switch (linux.getErrno(rc)) {
         .SUCCESS => return,
         .PERM => return error.NotPermitted,
-        else => |err| return std.os.unexpectedErrno(err),
+        .SRCH => return error.NoSuchProcess,
+        else => unreachable,
+    }
+}
+
+pub const SeizeError = error{ InvalidOption, NotPermitted, NoSuchProcess };
+pub fn seize(pid: Pid, options: Options) SeizeError!void {
+    const rc = ptrace4(SEIZE, pid, 0, @intCast(usize, options));
+    switch (linux.getErrno(rc)) {
+        .SUCCESS => return,
+        .INVAL => return error.InvalidOption,
+        .PERM => return error.NotPermitted,
+        .SRCH => return error.NoSuchProcess,
+        else => unreachable,
     }
 }
 
@@ -262,8 +280,8 @@ pub fn detach(pid: Pid, sig: Signal) RestartError!void {
     const rc = ptrace4(DETACH, pid, undefined, sig);
     switch (linux.getErrno(rc)) {
         .SUCCESS => return,
-        .SRCH => return error.NoSuchProcess,
         .IO => return error.InvalidSignal,
+        .SRCH => return error.NoSuchProcess,
         else => unreachable,
     }
 }
@@ -272,6 +290,7 @@ test {
     _ = std.testing.refAllDecls(@This());
 }
 
-test "traceme doesn't error" {
+test "traceme behaves as expected" {
     try traceMe();
+    try std.testing.expectError(error.NotPermitted, traceMe());
 }

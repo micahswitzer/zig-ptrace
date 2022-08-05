@@ -37,6 +37,7 @@ pub fn build(b: *std.build.Builder) void {
 
     const tracer = b.addExecutable("tracer", "test/tracer.zig");
     tracer.addPackage(ptrace_package);
+    tracer.addPackage(utils_package);
     tracer.setBuildMode(mode);
     tracer.setTarget(target);
     tracer.install();
@@ -63,7 +64,7 @@ pub fn build(b: *std.build.Builder) void {
     const run_step = b.step("run", "Run the tracer program");
     run_step.dependOn(&runner_step.step);
 
-    const main_tests = b.addTest("src/highlevel.zig");
+    const main_tests = b.addTest("src/main.zig");
     main_tests.setBuildMode(mode);
     main_tests.setTarget(target);
 

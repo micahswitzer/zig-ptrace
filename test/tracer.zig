@@ -1,7 +1,7 @@
 const std = @import("std");
 const ptrace = @import("ptrace");
 const ll = ptrace.lowlevel;
-const utils = @import("../src/utils.zig");
+const utils = @import("utils");
 
 const print = utils.makePrefixedPrint("p");
 const STOP = std.os.linux.SIG.STOP;
@@ -18,8 +18,7 @@ pub fn main() !void {
     const tracee_path = std.os.argv[1];
 
     print("Starting {s}", .{tracee_path});
-    const pid = try ll.spawnTraced(tracee_path);
-    var thread = ll.threadFromTraceme(pid);
+    var thread = try ll.spawnTraced(tracee_path);
     print("Child spawned as PID {}", .{thread.id});
     printState(thread);
     while (thread.isAttached()) {
