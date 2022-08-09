@@ -253,6 +253,16 @@ pub fn cont(pid: Pid, sig: Signal) RestartError!void {
     }
 }
 
+pub fn syscall(pid: Pid, sig: Signal) RestartError!void {
+    const rc = ptrace4(SYSCALL, pid, undefined, sig);
+    switch (linux.getErrno(rc)) {
+        .SUCCESS => return,
+        .IO => return error.InvalidSignal,
+        .SRCH => return error.NoSuchProcess,
+        else => unreachable,
+    }
+}
+
 pub const AttachError = error{ NotPermitted, NoSuchProcess };
 pub fn attach(pid: Pid) AttachError!void {
     const rc = ptrace2(ATTACH, pid);

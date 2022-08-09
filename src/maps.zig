@@ -74,9 +74,11 @@ pub const MapEntry = struct {
             @compileError("T must be of type std.io.Reader()");
         return struct {
             reader: T,
-            pub fn next(self: *const @This()) !?Self {
-                var buf: [512]u8 = undefined;
-                const line = self.reader.readUntilDelimiter(&buf, '\n') catch |err| switch (err) {
+            buffer: [512]u8 = undefined,
+
+            /// entry.path will be invalidated on the next call of `next`
+            pub fn next(self: *@This()) !?Self {
+                const line = self.reader.readUntilDelimiter(&self.buffer, '\n') catch |err| switch (err) {
                     error.EndOfStream => return null,
                     else => |e| return e,
                 };
@@ -96,7 +98,7 @@ test "parse system maps" {
     const file = try std.fs.cwd().openFile("/proc/self/maps", .{});
     defer file.close();
     var reader = file.reader();
-    const iter = iterator(reader);
+    var iter = iterator(reader);
     while (try iter.next()) |entry| {
         _ = entry;
     }

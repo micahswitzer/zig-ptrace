@@ -1,6 +1,8 @@
+const std = @import("std");
 const builtin = @import("builtin");
 const utils = @import("../utils.zig");
-const Args = utils.UniformTuple([6]type, usize);
+pub const Args = utils.UniformTuple([6]type, usize);
+const SYS = std.os.linux.SYS;
 
 // x86-specific constants
 pub const GETREGS = 12;
@@ -18,6 +20,26 @@ pub const ARCH_PRCTL = if (builtin.cpu.arch == .x86_64) 30 else @compileError("P
 pub const SYSEMU = 31;
 pub const SYSEMU_SINGLESTEP = 32;
 pub const SINGLEBLOCK = 33;
+
+fn getRegArgs(regs: UserRegs) Args {
+    const arg_names = UserRegs.args;
+    var res: Args = undefined;
+    var i: usize = 0;
+    inline for (arg_names) |arg_name| {
+        @field(res, std.fmt.comptimePrint("{}", .{i})) = @field(regs, arg_name);
+        i += 1;
+    }
+    return res;
+}
+
+fn setRegArgs(regs: *UserRegs, args: Args) void {
+    const arg_names = UserRegs.args;
+    var i: usize = 0;
+    inline for (arg_names) |arg_name| {
+        @field(regs, arg_name) = @field(args, std.fmt.comptimePrint("{}", .{i}));
+        i += 1;
+    }
+}
 
 // x86-specific structures
 pub const UserRegs = switch (builtin.cpu.arch) {
@@ -50,14 +72,38 @@ pub const UserRegs = switch (builtin.cpu.arch) {
         fs: u64,
         gs: u64,
 
-        pub inline fn syscall(self: @This()) usize {
+        pub const args = .{ "rdi", "rsi", "rdx", "r10", "r8", "r9" };
+
+        pub inline fn getSyscall(self: @This()) usize {
             return self.rax;
         }
-        pub inline fn args(self: @This()) Args {
-            return .{ self.rdi, self.rsi, self.rdx, self.r10, self.r8, self.r9 };
+        pub fn getArgs(self: @This()) Args {
+            var res: Args = undefined;
+            inline for (@typeInfo(@TypeOf(args)).Struct.fields) |field| {
+                @field(res, field.name) = @field(self, @field(args, field.name));
+            }
+            return res;
         }
-        pub inline fn ret(self: @This()) usize {
+        pub inline fn getRet(self: @This()) usize {
             return self.rax;
+        }
+        pub inline fn getPC(self: @This()) usize {
+            return self.rip;
+        }
+
+        pub inline fn setSyscall(self: *@This(), sys: SYS) void {
+            self.rax = @enumToInt(sys);
+        }
+        pub fn setArgs(self: *@This(), arg_values: Args) void {
+            inline for (@typeInfo(@TypeOf(args)).Struct.fields) |field| {
+                @field(self, @field(args, field.name)) = @field(arg_values, field.name);
+            }
+        }
+        pub inline fn setRet(self: *@This(), value: usize) void {
+            self.rax = value;
+        }
+        pub inline fn setPC(self: *@This(), value: usize) void {
+            self.rip = value;
         }
     },
     .i386 => extern struct {
@@ -79,14 +125,32 @@ pub const UserRegs = switch (builtin.cpu.arch) {
         esp: u32,
         xss: u32,
 
-        pub inline fn syscall(self: @This()) usize {
+        const args = [_][]const u8{ "ebx", "ecx", "edx", "esi", "edi", "ebp" };
+
+        pub inline fn getSyscall(self: @This()) usize {
             return self.eax;
         }
-        pub inline fn args(self: @This()) Args {
-            return .{ self.ebx, self.ecx, self.edx, self.esi, self.edi, self.ebp };
+        pub fn getArgs(self: @This()) Args {
+            return getRegArgs(self);
         }
-        pub inline fn ret(self: @This()) usize {
+        pub inline fn getRet(self: @This()) usize {
             return self.eax;
+        }
+        pub inline fn getPC(self: @This()) usize {
+            return self.eip;
+        }
+
+        pub inline fn setSyscall(self: *@This(), sys: SYS) void {
+            self.eax = @enumToInt(sys);
+        }
+        pub fn setArgs(self: *@This(), arg_values: Args) void {
+            setRegArgs(self, arg_values);
+        }
+        pub inline fn setRet(self: *@This(), value: usize) void {
+            self.eax = value;
+        }
+        pub inline fn setPC(self: *@This(), value: usize) void {
+            self.eip = value;
         }
     },
     else => unreachable,

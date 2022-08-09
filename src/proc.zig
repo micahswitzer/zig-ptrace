@@ -1,5 +1,6 @@
 const std = @import("std");
 const utils = @import("utils.zig");
+pub const maps = @import("maps.zig");
 
 const File = std.fs.File;
 const Dir = std.fs.Dir;
@@ -11,13 +12,22 @@ pub const PROC = "/proc";
 pub const PROC_SELF = PROC ++ "/self";
 pub const PID_MAX_CHARS = utils.maxCharsForInt(Pid);
 
+/// The proc filesystem is funny and will append this to link targets that have been deleted.
+/// The unfortunate part is that you can't tell if the file was actually deleted, or if its
+/// name just happens to end the same way...
+pub const LINK_TARGET_DELETED = " (deleted)";
+
 pub const EXE = "exe";
 pub const MAPS = "maps";
+pub const MEM = "mem";
+pub const PERSONALITY = "personality";
 pub const STATUS = "status";
 pub const TASKS = "tasks";
 pub const Entry = enum {
     exe,
     maps,
+    mem,
+    personality,
     status,
     tasks,
 };
@@ -32,15 +42,32 @@ pub const ENTRY_MAX_CHARS = blk: {
 pub const PATH_MAX = PROC.len + 1 + PID_MAX_CHARS + 1 + ENTRY_MAX_CHARS + 1;
 pub const PathBuffer = [PATH_MAX]u8;
 
+pub const PER = struct {
+    pub const LINUX = 0;
+    pub const LINUX32 = 8;
+};
+
 /// Get a zero-terminated string with the proc entry for the pid specified
-/// Use the type `PathBuffer` to ensure a large enough array
+/// Use the type `PathBuffer` to ensure a large enough buffer array
 pub fn getProcPathZ(comptime entry: Entry, pid: Pid, buffer: []u8) ![:0]u8 {
     return std.fmt.bufPrintZ(buffer, PROC ++ "/{}/" ++ @tagName(entry), .{pid});
 }
 
-pub fn getExePathZ(pid: Pid, buffer: []u8) ![]u8 {
+pub fn openProcFile(comptime entry: Entry, pid: Pid) !std.fs.File {
+    var path_buf: PathBuffer = undefined;
+    const path = getProcPathZ(entry, pid, &path_buf) catch unreachable;
+    return std.fs.openFileAbsoluteZ(path, .{});
+}
+
+pub fn openProcFileWriteable(comptime entry: Entry, pid: Pid) !std.fs.File {
+    var path_buf: PathBuffer = undefined;
+    const path = getProcPathZ(entry, pid, &path_buf) catch unreachable;
+    return std.fs.openFileAbsoluteZ(path, .{ .mode = .write_only });
+}
+
+pub fn getExePath(pid: Pid, buffer: []u8) ![]u8 {
     var path_buffer: PathBuffer = undefined;
-    // we always pass a large enough array, so we know that this format will not fail
+    // we always pass a large enough buffer, so we know that this format will not fail
     const proc_path = getProcPathZ(.exe, pid, &path_buffer) catch unreachable;
     return std.os.readlinkZ(proc_path, buffer);
 }
@@ -166,6 +193,12 @@ pub const ProcDir = struct {
         };
     }
 
+    fn getFileWritable(self: @This(), path: [*:0]const u8) !File {
+        return File{
+            .handle = try std.os.openatZ(self.fd, path, std.os.O.RDWR | std.os.O.CLOEXEC, 0),
+        };
+    }
+
     pub fn openSelf() !@This() {
         return @This(){
             .fd = try std.os.openZ(PROC_SELF, OPEN_DIR_FLAGS, 0),
@@ -204,4 +237,107 @@ pub const ProcDir = struct {
         defer file.close();
         return try ThreadStatus.fromFile(file);
     }
+
+    pub fn getPersonality(self: @This()) !u32 {
+        const file = try self.getFile(PERSONALITY);
+        defer file.close();
+        var persona_hex: [8]u8 = undefined;
+        try file.reader().readNoEof(&persona_hex);
+        return std.fmt.parseUnsigned(u32, persona_hex, 16);
+    }
+
+    pub fn getMemFile(self: @This()) !File {
+        return self.getFileWritable(MEM);
+    }
 };
+
+fn pathsEqual(original: []const u8, target: []const u8, possibly_deleted: bool) bool {
+    if (std.mem.eql(u8, original, target))
+        return true;
+    if (!possibly_deleted)
+        return false;
+    if (target.len + LINK_TARGET_DELETED.len != original.len)
+        return false;
+    const non_deleted_path = original[0 .. original.len - LINK_TARGET_DELETED.len];
+    return std.mem.eql(u8, non_deleted_path, target);
+}
+
+test "pathsEqual" {
+    try std.testing.expect(pathsEqual("/my/test/path", "/my/test/path", false));
+    try std.testing.expect(!pathsEqual("/my/test/path", "/my/test/other/path", false));
+    try std.testing.expect(pathsEqual("/my/test/path (deleted)", "/my/test/path", true));
+    try std.testing.expect(!pathsEqual("/my/test/path (deleted)", "/my/test/other/path", true));
+    try std.testing.expect(pathsEqual("/my/test/path (deleted)", "/my/test/path (deleted)", true));
+}
+
+pub usingnamespace if (@import("root") == @This()) struct {
+    // this file is being built as the root module, so export the main function
+    // this is done to avoid making `main` a part of the public API when this module
+    // is being used as a library
+    const log = std.log.scoped(.proc);
+    pub const log_level: std.log.Level = .info;
+    var exe_path_buf: [std.os.PATH_MAX]u8 = undefined;
+
+    pub fn main() !void {
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer arena.deinit();
+        const alloc = arena.allocator();
+        _ = alloc;
+
+        var proc_dir = try std.fs.openIterableDirAbsoluteZ(PROC, .{});
+        defer proc_dir.close();
+        var proc_iterator = proc_dir.iterate();
+
+        while (try proc_iterator.next()) |proc_entry| {
+            if (proc_entry.kind != .Directory)
+                continue;
+            std.debug.assert(proc_entry.name.len != 0);
+            if (!std.ascii.isDigit(proc_entry.name[0]))
+                continue;
+            const pid = std.fmt.parseUnsigned(Pid, proc_entry.name, 10) catch |err| switch (err) {
+                error.Overflow => {
+                    if (std.debug.runtime_safety) {
+                        log.warn("Tried to parse a PID that didn't fit the Pid type: {s}", .{proc_entry.name});
+                        continue;
+                    }
+                    unreachable;
+                },
+                // the directory started with a number, but is not a pid dir
+                error.InvalidCharacter => continue,
+            };
+
+            const maps_file = openProcFile(.maps, pid) catch |err|
+                if (err == error.AccessDenied)
+            {
+                log.info("Don't have permission to look at maps for {}", .{pid});
+                continue;
+            } else return err;
+            defer maps_file.close();
+            const exe_path = try getExePath(pid, &exe_path_buf);
+            // see note on `LINK_TARGET_DELETED` for why we can't know for sure (at this point)
+            const possibly_deleted = std.mem.endsWith(u8, exe_path, LINK_TARGET_DELETED);
+            log.debug("Parsing maps for PID {}, path = {s}, possibly_deleted = {}", .{ pid, exe_path, possibly_deleted });
+            var buffered_reader = std.io.bufferedReader(maps_file.reader());
+            const reader = buffered_reader.reader();
+            // const reader = maps_file.reader();
+            var maps_iterator = maps.iterator(reader);
+            const exe_entry = blk: while (try maps_iterator.next()) |maps_entry| {
+                if (!maps_entry.permissions.execute or maps_entry.path == null)
+                    continue;
+                if (!pathsEqual(exe_path, maps_entry.path.?, possibly_deleted)) {
+                    log.debug("Path is not the executable: {s}", .{maps_entry.path.?});
+                    continue;
+                }
+                var new_entry = maps_entry;
+                // this won't be valid once the iterator goes out of scope, so just clear
+                // it now since we don't need it anyways.
+                new_entry.path = null;
+                break :blk new_entry;
+            } else unreachable;
+
+            log.info("PID {} has its code loaded at {x}-{x}", .{ pid, exe_entry.start, exe_entry.end });
+            if (possibly_deleted)
+                log.warn("The executable path ends with '" ++ LINK_TARGET_DELETED ++ "', these results may be incorrect", .{});
+        }
+    }
+} else struct {};

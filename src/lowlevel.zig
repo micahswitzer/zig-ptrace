@@ -1,6 +1,8 @@
 const std = @import("std");
 const ptrace = @import("ptrace.zig");
 const util = @import("utils.zig");
+const snippets = @import("snippets.zig");
+const proc = @import("proc.zig");
 
 const linux = std.os.linux;
 const os = std.os;
@@ -14,6 +16,8 @@ const UserRegs = ptrace.UserRegs;
 /// A linux-specific flag to waitpid that says to wait on either a cloned or
 /// non-cloned child
 const __WALL = 0x40000000;
+
+const log = std.log.scoped(.lowlevel);
 
 pub const Thread = struct {
     id: Pid,
@@ -109,6 +113,15 @@ pub const Thread = struct {
         }
     }
 
+    /// Returns the signal the process is stopped at until the process ends
+    /// Note: this function will not automatically resume the thread if it's already stopped
+    pub fn nextSignal(self: *Thread) !?Signal {
+        return self.waitSignaled() catch |err| switch (err) {
+            error.NoSuchProcess => return null,
+            else => return err,
+        };
+    }
+
     pub fn stopUnchecked(self: *Thread) !void {
         std.debug.assert(self.state == .Running);
         const res = linux.tgkill(0, self.id, linux.SIG.STOP);
@@ -137,11 +150,133 @@ pub const Thread = struct {
             return error.NotStopped;
     }
 
+    pub fn peekTextUnchecked(self: *Thread, addr: usize) !usize {
+        self.assertStopped();
+        return ptrace.peekText(self.id, addr) catch |err| {
+            if (err == error.NoSuchProcess)
+                self.state = .Gone;
+            return err;
+        };
+    }
+
+    pub fn readTextUnchecked(self: *Thread, addr: usize, buffer: []u8) !void {
+        self.assertStopped();
+        const word_size = @sizeOf(usize);
+        const start_raw = addr;
+        const start_addr = std.mem.alignBackward(start_raw, word_size);
+        const offset = start_raw - start_addr;
+        const end_raw = start_raw + buffer.len;
+        const to_write = end_raw - start_raw;
+        var read_at = start_addr;
+        var write_idx: usize = 0;
+
+        // I love unaligned memory access :)
+        if (offset != 0) {
+            const word = try self.peekTextUnchecked(start_addr);
+            const bytes = std.mem.toBytes(word);
+            const write_count = @minimum(word_size - offset, to_write);
+            const write_bytes = bytes[offset .. offset + write_count];
+            std.mem.copy(u8, buffer, write_bytes);
+            read_at += word_size;
+            write_idx += write_count;
+        }
+        while (to_write - write_idx >= word_size) {
+            const word = try self.peekTextUnchecked(read_at);
+            const bytes = std.mem.toBytes(word);
+            std.mem.copy(u8, buffer[write_idx..], &bytes);
+            read_at += word_size;
+            write_idx += word_size;
+        }
+        const remaining = to_write - write_idx;
+        if (remaining != 0) {
+            const word = try self.peekTextUnchecked(read_at);
+            const bytes = std.mem.toBytes(word);
+            std.mem.copy(u8, buffer[write_idx..], bytes[0..remaining]);
+        }
+    }
+
+    pub fn readMem(self: Thread, addr: usize, buffer: []u8) !void {
+        const proc_mem = try proc.openProcFile(.mem, self.id);
+        defer proc_mem.close();
+        try proc_mem.seekTo(addr);
+        try proc_mem.reader().readNoEof(buffer);
+    }
+
+    pub fn writeMem(self: Thread, addr: usize, data: []const u8) !void {
+        const proc_mem = try proc.openProcFileWriteable(.mem, self.id);
+        defer proc_mem.close();
+        try proc_mem.seekTo(addr);
+        try proc_mem.writeAll(data);
+    }
+
+    pub fn doSyscall(self: *Thread, sys: linux.SYS, arguments: ptrace.Args) !usize {
+        self.assertStopped();
+        const regs_orig = try self.getRegsUnchecked();
+        var text_orig: [snippets.syscall.len]u8 = undefined;
+        const pc = regs_orig.getPC();
+        try self.readMem(pc, &text_orig);
+        const regs_syscall = blk: {
+            var regs = regs_orig;
+            regs.setSyscall(sys);
+            regs.setArgs(arguments);
+            break :blk regs;
+        };
+        try self.writeMem(pc, snippets.syscall);
+        // we want to be able to catch errors normally, so only errdefer here
+        errdefer self.writeMem(pc, &text_orig) catch {};
+        try self.setRegsUnchecked(regs_syscall);
+        errdefer self.setRegs(regs_orig) catch {};
+
+        // the ptrace syscall command will trap on syscall entry and exit
+        try self.syscallUnchecked(switch (self.state.Stopped) {
+            linux.SIG.STOP, linux.SIG.TRAP => 0,
+            else => |sig| sig,
+        });
+        // just wait until the trap and then immediately continue
+        // TODO detect when we trap on code other than a syscall
+        // (will this happen if we ensure the next instruction is `syscall`?)
+        while (try self.nextSignal()) |sig| {
+            if (sig == linux.SIG.TRAP)
+                break;
+            if (sig == linux.SIG.STOP) {
+                log.err("Unexpected SIGSTOP, expected SIGTRAP", .{});
+                try self.contUnchecked(0);
+            }
+            try self.contUnchecked(sig);
+        } else {
+            log.err("Process died while waiting for syscall to start", .{});
+            return error.NoSuchProcess;
+        }
+        // TODO probably not the right resume signal for every situation
+        try self.syscallUnchecked(0);
+        // now we wait for the syscall to complete
+        while (try self.nextSignal()) |sig| {
+            if (sig == linux.SIG.TRAP)
+                break;
+            if (sig == linux.SIG.STOP) {
+                log.err("Unexpected SIGSTOP, expected SIGTRAP", .{});
+                try self.contUnchecked(0);
+            }
+            try self.contUnchecked(sig);
+        } else {
+            // TODO this might happen with system calls such as `exit` and `abort`?
+            log.err("Process died while waiting for syscall to complete", .{});
+            return error.NoSuchProcess;
+        }
+        // inspect the results and restore the original state
+        const regs_result = try self.getRegsUnchecked();
+        try self.writeMem(pc, &text_orig);
+        try self.setRegsUnchecked(regs_orig);
+        return regs_result.getRet();
+    }
+
     pub fn getRegsUnchecked(self: *Thread) !UserRegs {
         self.assertStopped();
         return ptrace.getRegs(self.id) catch |err| {
-            if (err == error.NoSuchProcess)
-                self.state = .Gone;
+            switch (err) {
+                // exhaustive matching will ensure we handle any new errors that are added
+                error.NoSuchProcess => self.state = .Gone,
+            }
             return err;
         };
     }
@@ -207,6 +342,21 @@ pub const Thread = struct {
     pub fn cont(self: *Thread, sig: Signal) !void {
         try self.testStopped();
         return self.contUnchecked(sig);
+    }
+
+    pub fn syscallUnchecked(self: *Thread, sig: Signal) !void {
+        self.assertStopped();
+        ptrace.syscall(self.id, sig) catch |err| {
+            if (err == error.NoSuchProcess)
+                self.state = .Gone;
+            return err;
+        };
+        self.state = .Running;
+    }
+
+    pub fn syscall(self: *Thread, sig: Signal) !void {
+        try self.testStopped();
+        return self.syscallUnchecked(sig);
     }
 
     pub fn attachUnchecked(self: *Thread) !void {
@@ -282,10 +432,12 @@ pub fn signalToString(sig: Signal) []const u8 {
 
 test "thread create and wait" {
     var thread = try spawnTraced("/bin/ls");
-    _ = try thread.waitSignaled();
-    try std.testing.expectEqual(Thread.State{ .Stopped = linux.SIG.STOP }, thread.state);
+    try std.testing.expectEqual(@as(Signal, linux.SIG.STOP), try thread.waitSignaled());
     try thread.cont(0);
-    _ = try thread.waitSignaled();
-    try std.testing.expectEqual(Thread.State{ .Stopped = linux.SIG.TRAP }, thread.state);
+    try std.testing.expectEqual(@as(Signal, linux.SIG.TRAP), try thread.waitSignaled());
     try thread.detach(0);
+}
+
+test {
+    _ = snippets;
 }

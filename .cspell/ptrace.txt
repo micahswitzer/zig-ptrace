@@ -4,7 +4,11 @@ CLOEXEC
 EBUSY
 EFAULT
 eflags
+Ehdr
 EINVAL
+ELFCLASS
+ELFDATA
+endianness
 EPERM
 errno
 ESRCH
@@ -34,6 +38,10 @@ PEEKDATA
 PEEKSIGINFO
 PEEKTEXT
 PEEKUSER
+Phdr
+phdrs
+phentsize
+phoff
 POKEDATA
 POKETEXT
 POKEUSER
@@ -43,6 +51,7 @@ RDONLY
 readlink
 readlinkat
 regs
+Rela
 rval
 SECCOMP
 SETFPREGS
@@ -52,6 +61,10 @@ SETREGS
 SETREGSET
 SETSIGINFO
 SETSIGMASK
+Shdr
+shdrs
+shentsize
+shoff
 sigaction
 siginfo
 SIGINT
@@ -62,6 +75,7 @@ SINGLESTEP
 spawnee
 SRCH
 STOPSIG
+Syminfo
 Syscall
 SYSEMU
 TERMSIG
