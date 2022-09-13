@@ -17,6 +17,10 @@ const functions = struct {
     export fn _exit() callconv(.Naked) noreturn {
         linux.exit(0);
     }
+    export fn _trap() callconv(.Naked) noreturn {
+        asm volatile ("int3");
+        unreachable;
+    }
 };
 
 const library = struct {
@@ -27,6 +31,7 @@ const library = struct {
     // make the contents of each function available
     pub const syscall = elf_file.comptimeFn("_syscall");
     pub const exit = elf_file.comptimeFn("_exit");
+    pub const trap = elf_file.comptimeFn("_trap");
 };
 
 // magically make this file do different things depending on how it's used

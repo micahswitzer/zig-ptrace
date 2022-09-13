@@ -1,8 +1,11 @@
 const std = @import("std");
 const utils = @import("utils");
+const linux = std.os.linux;
 
 const Signal = utils.Signal;
 const SignalInfo = std.os.linux.siginfo_t;
+
+const SUID_DUMP_DISABLE = 0;
 
 fn sigHandler(sig: Signal, info: *const SignalInfo) void {
     _ = sig;
@@ -12,9 +15,10 @@ fn sigHandler(sig: Signal, info: *const SignalInfo) void {
 const SIGNAL = std.os.linux.SIG.USR1;
 const SIGNAL_NAME = utils.intDeclToString(std.os.linux.SIG, SIGNAL).?;
 
-pub fn main() void {
+pub fn main() u8 {
     std.debug.print("Starting.\n", .{});
-    utils.setSignalAction(SIGNAL, sigHandler) catch return;
+    utils.setSignalAction(SIGNAL, sigHandler) catch return 1;
+    _ = std.os.prctl(linux.PR.SET_DUMPABLE, .{SUID_DUMP_DISABLE}) catch return 2;
 
     std.debug.print("Registered signal handler for " ++ SIGNAL_NAME ++ "\n", .{});
 
@@ -23,4 +27,5 @@ pub fn main() void {
     }
 
     std.debug.print("Exiting.\n", .{});
+    return 0;
 }

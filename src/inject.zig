@@ -130,16 +130,27 @@ pub const ElfFile = struct {
         return std.mem.sliceTo(self.strings.?[index..], 0);
     }
 
+    pub fn getFnOffset(self: @This(), name: []const u8) ?usize {
+        if (self.section_headers == null or self.symbols == null or self.strings == null) return null;
+        for (self.symbols.?) |sym| {
+            if (sym.st_info & 0xf != elf.STT_FUNC) continue;
+            if (sym.st_name == 0) continue;
+            const sym_name = self.getString(sym.st_name) orelse continue;
+            if (!std.mem.eql(u8, sym_name, name))
+                continue;
+            return sym.st_value;
+        }
+        return null;
+    }
+
     pub fn getSymbol(self: @This(), name: []const u8, sym_type: u4) ?[]const u8 {
         if (self.section_headers == null or self.symbols == null or self.strings == null) return null;
         for (self.symbols.?) |sym| {
             if (sym.st_info & 0xf != sym_type) continue;
             if (sym.st_name == 0) continue;
             const sym_name = self.getString(sym.st_name) orelse continue;
-            if (!std.mem.eql(u8, sym_name, name)) {
-                log.debug("Symbol name {s} doesn't match desired name {s}", .{ sym_name, name });
+            if (!std.mem.eql(u8, sym_name, name))
                 continue;
-            }
             const section = self.section_headers.?[sym.st_shndx];
             const start = section.sh_offset + sym.st_value;
             const end = start + sym.st_size;

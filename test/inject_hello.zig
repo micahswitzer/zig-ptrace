@@ -1,5 +1,6 @@
 const std = @import("std");
 const ptrace = @import("ptrace");
+const snippets = @import("artifacts");
 
 const elf = std.elf;
 const linux = std.os.linux;
@@ -9,7 +10,7 @@ const proc = ptrace.proc;
 
 const log = std.log;
 
-const LOAD_ADDR = 0xaa000000;
+const STACK_SIZE = std.mem.page_size;
 
 const RegionInfo = struct {
     file_bytes: []const u8,
@@ -64,6 +65,7 @@ pub fn main() !void {
         log.err("The payload doesn't have an executable ALLOC section", .{});
         return error.BadPayload;
     };
+    const request_size = std.mem.alignForward(payload_exe.mem_size + STACK_SIZE, std.mem.page_size);
 
     if (payload_elf.rel) |rel| for (rel) |r| {
         const symbol = payload_elf.symbols.?[r.r_sym()];
@@ -81,6 +83,8 @@ pub fn main() !void {
         log.debug("RELA for symbol {s} in {s} at offset {}, addend {}", .{ sym_name, sh_name, r.r_offset, r.r_addend });
     };
 
+    const entry_offset = payload_elf.getFnOffset("entry") orelse return error.NoEntrypoint;
+
     log.info("Payload successfully loaded", .{});
     const proc_dir = try proc.ProcDir.open(pid);
     defer proc_dir.close();
@@ -97,7 +101,8 @@ pub fn main() !void {
             if (entry.path == null) continue;
             min_addr = @minimum(min_addr, entry.start);
         }
-        break :blk std.mem.alignBackward(min_addr - payload_exe.mem_size, std.mem.page_size);
+
+        break :blk min_addr - request_size;
     } else payload_exe.load_addr;
 
     log.info("Attaching to the target process", .{});
@@ -122,19 +127,66 @@ pub fn main() !void {
     const load_addr = blk: {
         const res = try thread.doSyscall(
             .mmap,
-            .{ load_request, payload_exe.mem_size, linux.PROT.EXEC | linux.PROT.READ, linux.MAP.PRIVATE | linux.MAP.ANONYMOUS, @bitCast(usize, @as(isize, -1)), 0 },
+            .{
+                load_request,
+                request_size,
+                linux.PROT.EXEC | linux.PROT.READ | linux.PROT.WRITE,
+                linux.MAP.PRIVATE | linux.MAP.ANONYMOUS,
+                @bitCast(usize, @as(isize, -1)),
+                0,
+            },
         );
         const err = linux.getErrno(res);
         if (err != .SUCCESS)
             return std.os.unexpectedErrno(err);
         break :blk res;
     };
+
+    const WORD_SIZE = @sizeOf(usize);
+    const stack_end = load_addr + request_size;
+    var stack_region: [WORD_SIZE * 2]u8 = undefined;
+    std.mem.writeIntNative(usize, stack_region[0..WORD_SIZE], stack_end - WORD_SIZE);
+    std.mem.copy(u8, stack_region[WORD_SIZE..], snippets.trap);
+    const sp = stack_end - stack_region.len;
+    const pc = load_addr + entry_offset;
+
     log.info("Kernel gave us {x}. Copying code into region", .{load_addr});
     {
         const proc_mem = try proc_dir.getMemFile();
         defer proc_mem.close();
+        log.info("Write {} to {x}", .{std.fmt.fmtSliceHexLower(payload_exe.file_bytes), load_addr});
         try proc_mem.pwriteAll(payload_exe.file_bytes, load_addr);
+        log.info("Write {} to {x}", .{std.fmt.fmtSliceHexLower(&stack_region), sp});
+        try proc_mem.pwriteAll(&stack_region, sp);
     }
+
+    log.info("Saving registers.", .{});
+    const reg_orig = try thread.getRegsUnchecked();
+    const reg_new = blk: {
+        var regs = reg_orig;
+        regs.setSP(sp);
+        regs.setPC(pc);
+        break :blk regs;
+    };
+    try thread.setRegsUnchecked(reg_new);
+    errdefer thread.setRegs(reg_orig) catch {};
+
+    try thread.cont(0);
+
+    switch (try thread.waitSignaled()) {
+        linux.SIG.TRAP => {},
+        else => |sig| {
+            log.err("Unexpected stop signal {} while waiting for payload exit", .{sig});
+            return error.UnexpectedSignal;
+        },
+    }
+
+    const result_regs = try thread.getRegsUnchecked();
+    const result_val = @truncate(c_int, @bitCast(isize, result_regs.getRet()));
+    const result_pc = result_regs.getPC();
+    log.info("Payload exited with code {x} at {x}. Restoring", .{result_val, result_pc});
+
+    try thread.setRegsUnchecked(reg_orig);
 
     log.info("Done!", .{});
 }

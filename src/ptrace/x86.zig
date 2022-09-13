@@ -105,6 +105,9 @@ pub const UserRegs = switch (builtin.cpu.arch) {
         pub inline fn setPC(self: *@This(), value: usize) void {
             self.rip = value;
         }
+        pub inline fn setSP(self: *@This(), value: usize) void {
+            self.rsp = value;
+        }
     },
     .i386 => extern struct {
         ebx: u32,

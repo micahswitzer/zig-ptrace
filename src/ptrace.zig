@@ -25,7 +25,8 @@ pub const SYSCALL = 24;
 
 const Arch = switch (builtin.cpu.arch) {
     .i386, .x86_64 => @import("ptrace/x86.zig"),
-    else => struct {}, // allow code that doesn't use any platform-specific features to compile
+    // allow code that doesn't use any platform-specific features to compile
+    else => struct {},
 };
 pub usingnamespace Arch;
 

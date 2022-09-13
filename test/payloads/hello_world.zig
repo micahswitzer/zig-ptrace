@@ -3,7 +3,7 @@ const inject = @import("ptrace").inject;
 const Result = inject.PayloadResult;
 const utils = @import("utils");
 
-export fn setup(load_addr: usize) Result {
+export fn entry(load_addr: usize) callconv(.C) Result {
     _ = load_addr;
     var b: [13]u8 = undefined;
     b[0] = 'H';

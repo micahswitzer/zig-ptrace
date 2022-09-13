@@ -15,7 +15,7 @@ pub fn main() !void {
     var process = std.ChildProcess.init(&subprocess_args, alloc);
     try process.spawn();
     errdefer {
-        _ = process.kill() catch std.ChildProcess.Term{ .Unknown = 0 };
+        _ = process.kill() catch {};
     }
 
     std.time.sleep(1000 * 1000 * 1000 * 2);
@@ -23,7 +23,12 @@ pub fn main() !void {
 
     while (true) {
         const signal = try thread.waitSignaled();
-        std.debug.print("Got SIG{s}\n", .{utils.intDeclToString(std.os.linux.SIG, signal) orelse "UNKNOWN"});
+        std.debug.print("Got SIG{s}\n", .{
+            if (utils.intDeclToString(std.os.linux.SIG, signal)) |str|
+                str[0..]
+            else
+                "UNKNOWN",
+        });
         if (signal == std.os.linux.SIG.STOP) {
             try thread.detach(0);
             break;
