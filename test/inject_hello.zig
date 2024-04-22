@@ -1,10 +1,10 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const ptrace = @import("ptrace");
-const snippets = @import("artifacts");
+const snippets = @import("embed");
 
 const elf = std.elf;
 const linux = std.os.linux;
-const inject = ptrace.inject;
 const ll = ptrace.lowlevel;
 const proc = ptrace.proc;
 
@@ -34,9 +34,16 @@ pub fn main() !void {
     defer payload_file.close();
     const payload_stat = try payload_file.stat();
     const payload_size = payload_stat.size;
-    const payload_mapped = try std.os.mmap(null, payload_size, std.os.PROT.READ, std.os.MAP.PRIVATE, payload_file.handle, 0);
-    defer std.os.munmap(payload_mapped);
-    const payload_elf = try inject.ElfFile.fromMemory(payload_mapped);
+    const payload_mapped = try std.posix.mmap(
+        null,
+        payload_size,
+        std.posix.PROT.READ,
+        .{ .TYPE = .PRIVATE },
+        payload_file.handle,
+        0,
+    );
+    defer std.posix.munmap(payload_mapped);
+    const payload_elf = try ptrace.ElfFile.fromMemory(payload_mapped);
 
     log.info("Finding executable segments", .{});
     const payload_exe = blk: {
@@ -65,7 +72,7 @@ pub fn main() !void {
         log.err("The payload doesn't have an executable ALLOC section", .{});
         return error.BadPayload;
     };
-    const request_size = std.mem.alignForward(payload_exe.mem_size + STACK_SIZE, std.mem.page_size);
+    const request_size = std.mem.alignForward(usize, payload_exe.mem_size + STACK_SIZE, std.mem.page_size);
 
     if (payload_elf.rel) |rel| for (rel) |r| {
         const symbol = payload_elf.symbols.?[r.r_sym()];
@@ -99,7 +106,7 @@ pub fn main() !void {
         var maps_iter = proc.maps.iterator(maps_file.reader());
         while (try maps_iter.next()) |entry| {
             if (entry.path == null) continue;
-            min_addr = @minimum(min_addr, entry.start);
+            min_addr = @min(min_addr, entry.start);
         }
 
         break :blk min_addr - request_size;
@@ -131,22 +138,22 @@ pub fn main() !void {
                 load_request,
                 request_size,
                 linux.PROT.EXEC | linux.PROT.READ | linux.PROT.WRITE,
-                linux.MAP.PRIVATE | linux.MAP.ANONYMOUS,
-                @bitCast(usize, @as(isize, -1)),
+                @as(u32, @bitCast(linux.MAP{ .TYPE = .PRIVATE, .ANONYMOUS = true })),
+                @as(usize, @bitCast(@as(isize, -1))),
                 0,
             },
         );
-        const err = linux.getErrno(res);
+        const err = linux.E.init(res);
         if (err != .SUCCESS)
-            return std.os.unexpectedErrno(err);
+            return std.posix.unexpectedErrno(err);
         break :blk res;
     };
 
     const WORD_SIZE = @sizeOf(usize);
     const stack_end = load_addr + request_size;
     var stack_region: [WORD_SIZE * 2]u8 = undefined;
-    std.mem.writeIntNative(usize, stack_region[0..WORD_SIZE], stack_end - WORD_SIZE);
-    std.mem.copy(u8, stack_region[WORD_SIZE..], snippets.trap);
+    std.mem.writeInt(usize, stack_region[0..WORD_SIZE], stack_end - WORD_SIZE, builtin.cpu.arch.endian());
+    @memcpy(std.mem.sliceAsBytes(stack_region[WORD_SIZE..]).ptr, snippets.trap);
     const sp = stack_end - stack_region.len;
     const pc = load_addr + entry_offset;
 
@@ -154,9 +161,9 @@ pub fn main() !void {
     {
         const proc_mem = try proc_dir.getMemFile();
         defer proc_mem.close();
-        log.info("Write {} to {x}", .{std.fmt.fmtSliceHexLower(payload_exe.file_bytes), load_addr});
+        log.info("Write {} to {x}", .{ std.fmt.fmtSliceHexLower(payload_exe.file_bytes), load_addr });
         try proc_mem.pwriteAll(payload_exe.file_bytes, load_addr);
-        log.info("Write {} to {x}", .{std.fmt.fmtSliceHexLower(&stack_region), sp});
+        log.info("Write {} to {x}", .{ std.fmt.fmtSliceHexLower(&stack_region), sp });
         try proc_mem.pwriteAll(&stack_region, sp);
     }
 
@@ -182,9 +189,9 @@ pub fn main() !void {
     }
 
     const result_regs = try thread.getRegsUnchecked();
-    const result_val = @truncate(c_int, @bitCast(isize, result_regs.getRet()));
+    const result_val: c_int = @truncate(@as(isize, @bitCast(result_regs.getRet())));
     const result_pc = result_regs.getPC();
-    log.info("Payload exited with code {x} at {x}. Restoring", .{result_val, result_pc});
+    log.info("Payload exited with code {x} at {x}. Restoring", .{ result_val, result_pc });
 
     try thread.setRegsUnchecked(reg_orig);
 

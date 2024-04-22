@@ -19,7 +19,7 @@ pub fn main() !void {
     }
 
     std.time.sleep(1000 * 1000 * 1000 * 2);
-    var thread = try ll.attachThread(process.pid);
+    var thread = try ll.attachThread(process.id);
 
     while (true) {
         const signal = try thread.waitSignaled();
@@ -36,6 +36,6 @@ pub fn main() !void {
         try thread.contUnchecked(signal);
     }
 
-    try std.os.kill(process.pid, std.os.linux.SIG.TERM);
+    try std.posix.kill(process.id, std.os.linux.SIG.TERM);
     _ = try process.wait();
 }

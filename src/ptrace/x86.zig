@@ -1,6 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const utils = @import("../utils.zig");
+const utils = @import("utils");
 pub const Args = utils.UniformTuple([6]type, usize);
 const SYS = std.os.linux.SYS;
 
@@ -92,7 +92,7 @@ pub const UserRegs = switch (builtin.cpu.arch) {
         }
 
         pub inline fn setSyscall(self: *@This(), sys: SYS) void {
-            self.rax = @enumToInt(sys);
+            self.rax = @intFromEnum(sys);
         }
         pub fn setArgs(self: *@This(), arg_values: Args) void {
             inline for (@typeInfo(@TypeOf(args)).Struct.fields) |field| {
@@ -109,7 +109,7 @@ pub const UserRegs = switch (builtin.cpu.arch) {
             self.rsp = value;
         }
     },
-    .i386 => extern struct {
+    .x86 => extern struct {
         ebx: u32,
         ecx: u32,
         edx: u32,
@@ -144,7 +144,7 @@ pub const UserRegs = switch (builtin.cpu.arch) {
         }
 
         pub inline fn setSyscall(self: *@This(), sys: SYS) void {
-            self.eax = @enumToInt(sys);
+            self.eax = @intFromEnum(sys);
         }
         pub fn setArgs(self: *@This(), arg_values: Args) void {
             setRegArgs(self, arg_values);

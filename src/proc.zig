@@ -1,12 +1,12 @@
 const std = @import("std");
-const utils = @import("utils.zig");
+const utils = @import("utils");
 pub const maps = @import("maps.zig");
 
 const File = std.fs.File;
 const Dir = std.fs.Dir;
 const IterableDir = std.fs.IterableDir;
 
-const Pid = std.os.pid_t;
+const Pid = std.posix.pid_t;
 
 pub const PROC = "/proc";
 pub const PROC_SELF = PROC ++ "/self";
@@ -33,8 +33,8 @@ pub const Entry = enum {
 };
 pub const ENTRY_MAX_CHARS = blk: {
     var max = 0;
-    inline for (std.meta.tags(Entry)) |tag| {
-        max = std.math.max(max, @tagName(tag).len);
+    for (std.meta.tags(Entry)) |tag| {
+        max = @max(max, @tagName(tag).len);
     }
     break :blk max;
 };
@@ -69,7 +69,7 @@ pub fn getExePath(pid: Pid, buffer: []u8) ![]u8 {
     var path_buffer: PathBuffer = undefined;
     // we always pass a large enough buffer, so we know that this format will not fail
     const proc_path = getProcPathZ(.exe, pid, &path_buffer) catch unreachable;
-    return std.os.readlinkZ(proc_path, buffer);
+    return std.posix.readlinkZ(proc_path, buffer);
 }
 
 pub const TaskDir = struct {
@@ -110,7 +110,7 @@ pub const ThreadStatus = struct {
     fn fromReader(reader: anytype) !@This() {
         var buffer: [BUFFER_SIZE]u8 = undefined;
         var good_line = true;
-        var fields_remaining = @intCast(std.math.IntFittingRange(0, NUM_FIELDS), NUM_FIELDS);
+        var fields_remaining: std.math.IntFittingRange(0, NUM_FIELDS) = @intCast(NUM_FIELDS);
         var status: @This() = undefined;
         while (fields_remaining > 0) {
             const line = reader.readUntilDelimiter(&buffer, '\n') catch |err| switch (err) {
@@ -182,26 +182,39 @@ test "parse ThreadStatus from host" {
 }
 
 pub const ProcDir = struct {
-    fd: std.os.fd_t,
+    fd: std.posix.fd_t,
 
-    const OPEN_DIR_FLAGS = std.os.O.RDONLY | std.os.O.CLOEXEC | std.os.O.DIRECTORY | std.os.O.PATH;
-    const OPEN_FILE_FLAGS = std.os.O.RDONLY | std.os.O.CLOEXEC;
+    const OPEN_DIR_FLAGS: std.posix.O = .{
+        .ACCMODE = .RDONLY,
+        .CLOEXEC = true,
+        .DIRECTORY = true,
+        .PATH = true,
+    };
+    const OPEN_FILE_FLAGS: std.posix.O = .{
+        .ACCMODE = .RDONLY,
+        .CLOEXEC = true,
+    };
 
     fn getFile(self: @This(), path: [*:0]const u8) !File {
         return File{
-            .handle = try std.os.openatZ(self.fd, path, OPEN_FILE_FLAGS, 0),
+            .handle = try std.posix.openatZ(self.fd, path, OPEN_FILE_FLAGS, 0),
         };
     }
 
     fn getFileWritable(self: @This(), path: [*:0]const u8) !File {
         return File{
-            .handle = try std.os.openatZ(self.fd, path, std.os.O.RDWR | std.os.O.CLOEXEC, 0),
+            .handle = try std.posix.openatZ(
+                self.fd,
+                path,
+                std.posix.O{ .ACCMODE = .RDWR, .CLOEXEC = true },
+                0,
+            ),
         };
     }
 
     pub fn openSelf() !@This() {
         return @This(){
-            .fd = try std.os.openZ(PROC_SELF, OPEN_DIR_FLAGS, 0),
+            .fd = try std.posix.openZ(PROC_SELF, OPEN_DIR_FLAGS, 0),
         };
     }
 
@@ -209,16 +222,16 @@ pub const ProcDir = struct {
         var path_buf: [PROC.len + 1 + PID_MAX_CHARS + 1]u8 = undefined;
         const path = std.fmt.bufPrintZ(&path_buf, PROC ++ "/{}", .{pid}) catch unreachable;
         return @This(){
-            .fd = try std.os.openZ(path, OPEN_DIR_FLAGS, 0),
+            .fd = try std.posix.openZ(path, OPEN_DIR_FLAGS, 0),
         };
     }
 
     pub fn close(self: @This()) void {
-        std.os.close(self.fd);
+        std.posix.close(self.fd);
     }
 
     pub fn getExePath(self: @This(), buf: []u8) ![]u8 {
-        return std.os.readlinkatZ(self.fd, EXE, buf);
+        return std.posix.readlinkatZ(self.fd, EXE, buf);
     }
 
     pub fn getMapsFile(self: @This()) !File {
@@ -227,7 +240,7 @@ pub const ProcDir = struct {
 
     pub fn getTasksDir(self: @This()) !TaskDir {
         const dir = IterableDir{
-            .dir = .{ .fd = try std.os.openatZ(self.fd, TASKS, OPEN_DIR_FLAGS, 0) },
+            .dir = .{ .fd = try std.posix.openatZ(self.fd, TASKS, OPEN_DIR_FLAGS, 0) },
         };
         return TaskDir{ .dir = dir };
     }
@@ -276,7 +289,7 @@ pub usingnamespace if (@import("root") == @This()) struct {
     // is being used as a library
     const log = std.log.scoped(.proc);
     pub const log_level: std.log.Level = .info;
-    var exe_path_buf: [std.os.PATH_MAX]u8 = undefined;
+    var exe_path_buf: [std.posix.PATH_MAX]u8 = undefined;
 
     pub fn main() !void {
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);

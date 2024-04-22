@@ -18,12 +18,12 @@ const SIGNAL_NAME = utils.intDeclToString(std.os.linux.SIG, SIGNAL).?;
 pub fn main() u8 {
     std.debug.print("Starting.\n", .{});
     utils.setSignalAction(SIGNAL, sigHandler) catch return 1;
-    _ = std.os.prctl(linux.PR.SET_DUMPABLE, .{SUID_DUMP_DISABLE}) catch return 2;
+    _ = std.posix.prctl(linux.PR.SET_DUMPABLE, .{SUID_DUMP_DISABLE}) catch return 2;
 
     std.debug.print("Registered signal handler for " ++ SIGNAL_NAME ++ "\n", .{});
 
     while (true) {
-        std.os.raise(SIGNAL) catch break;
+        std.posix.raise(SIGNAL) catch break;
     }
 
     std.debug.print("Exiting.\n", .{});

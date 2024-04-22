@@ -97,7 +97,7 @@ pub fn iterator(reader: anytype) MapEntry.Iterator(@TypeOf(reader)) {
 test "parse system maps" {
     const file = try std.fs.cwd().openFile("/proc/self/maps", .{});
     defer file.close();
-    var reader = file.reader();
+    const reader = file.reader();
     var iter = iterator(reader);
     while (try iter.next()) |entry| {
         _ = entry;

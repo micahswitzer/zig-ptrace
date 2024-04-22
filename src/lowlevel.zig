@@ -1,11 +1,11 @@
 const std = @import("std");
 const ptrace = @import("ptrace.zig");
-const util = @import("utils.zig");
-const snippets = @import("snippets.zig");
+const util = @import("utils");
+const snippets = @import("embed");
 const proc = @import("proc.zig");
 
 const linux = std.os.linux;
-const os = std.os;
+const os = std.posix;
 
 const Options = ptrace.Options;
 const Pid = ptrace.Pid;
@@ -71,9 +71,9 @@ pub const Thread = struct {
         std.debug.assert(self.state == .Running);
         var status: u32 = undefined;
         const res = linux.waitpid(self.id, &status, __WALL);
-        switch (linux.getErrno(res)) {
+        switch (linux.E.init(res)) {
             .SUCCESS => {
-                const pid = @intCast(Pid, res);
+                const pid: Pid = @intCast(res);
                 std.debug.assert(pid == self.id);
                 self.state = State.fromStatus(status);
             },
@@ -174,7 +174,7 @@ pub const Thread = struct {
         if (offset != 0) {
             const word = try self.peekTextUnchecked(start_addr);
             const bytes = std.mem.toBytes(word);
-            const write_count = @minimum(word_size - offset, to_write);
+            const write_count = @min(word_size - offset, to_write);
             const write_bytes = bytes[offset .. offset + write_count];
             std.mem.copy(u8, buffer, write_bytes);
             read_at += word_size;

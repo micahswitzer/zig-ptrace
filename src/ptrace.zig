@@ -1,7 +1,7 @@
 const builtin = @import("builtin");
 const std = @import("std");
 const linux = std.os.linux;
-const os = std.os;
+const os = std.posix;
 
 comptime {
     if (builtin.os.tag != .linux) @compileError("zig-ptrace only supports Linux");
@@ -24,7 +24,7 @@ pub const DETACH = 17;
 pub const SYSCALL = 24;
 
 const Arch = switch (builtin.cpu.arch) {
-    .i386, .x86_64 => @import("ptrace/x86.zig"),
+    .x86, .x86_64 => @import("ptrace/x86.zig"),
     // allow code that doesn't use any platform-specific features to compile
     else => struct {},
 };
@@ -164,13 +164,13 @@ inline fn ptrace4(request: usize, pid: Pid, addr: usize, data: usize) usize {
 }
 
 inline fn pid2arg(pid: Pid) usize {
-    return @bitCast(usize, @as(isize, pid));
+    return @bitCast(@as(isize, pid));
 }
 
 pub const TraceMeError = error{NotPermitted};
 pub fn traceMe() TraceMeError!void {
     const rc = ptrace1(TRACEME);
-    switch (linux.getErrno(rc)) {
+    switch (linux.E.init(rc)) {
         .SUCCESS => return,
         .PERM => return error.NotPermitted, // the calling thread is already being traced
         else => unreachable,
@@ -180,8 +180,8 @@ pub fn traceMe() TraceMeError!void {
 const MemoryOperationError = error{ InvalidMemArea, NoSuchProcess };
 pub fn peekText(pid: Pid, addr: usize) MemoryOperationError!usize {
     var res: usize = undefined;
-    const rc = ptrace4(PEEKTEXT, pid, addr, @ptrToInt(&res));
-    switch (linux.getErrno(rc)) {
+    const rc = ptrace4(PEEKTEXT, pid, addr, @intFromPtr(&res));
+    switch (linux.E.init(rc)) {
         .SUCCESS => return res,
         .FAULT, .IO => return error.InvalidMemArea,
         .SRCH => return error.NoSuchProcess,
@@ -192,7 +192,7 @@ pub fn peekText(pid: Pid, addr: usize) MemoryOperationError!usize {
 pub usingnamespace if (@hasDecl(Arch, "GETREGS")) struct {
     pub fn getRegs(pid: Pid) NoSuchProcessError!Arch.UserRegs {
         var user_regs: Arch.UserRegs = undefined;
-        const regs_ptr = @ptrToInt(&user_regs);
+        const regs_ptr = @intFromPtr(&user_regs);
         const rc = ptrace4(
             Arch.GETREGS,
             pid,
@@ -200,7 +200,7 @@ pub usingnamespace if (@hasDecl(Arch, "GETREGS")) struct {
             comptime if (builtin.cpu.arch.isSPARC()) regs_ptr else undefined,
             comptime if (!builtin.cpu.arch.isSPARC()) regs_ptr else undefined,
         );
-        switch (linux.getErrno(rc)) {
+        switch (linux.E.init(rc)) {
             .SUCCESS => return user_regs,
             .SRCH => return error.NoSuchProcess,
             else => unreachable,
@@ -213,10 +213,10 @@ pub usingnamespace if (@hasDecl(Arch, "SETREGS")) struct {
         const rc = ptrace4(
             Arch.SETREGS,
             pid,
-            comptime if (builtin.cpu.arch.isSPARC()) @ptrToInt(&user_regs) else undefined,
-            comptime if (!builtin.cpu.arch.isSPARC()) @ptrToInt(&user_regs) else undefined,
+            if (comptime builtin.cpu.arch.isSPARC()) @intFromPtr(&user_regs) else undefined,
+            if (comptime !builtin.cpu.arch.isSPARC()) @intFromPtr(&user_regs) else undefined,
         );
-        switch (linux.getErrno(rc)) {
+        switch (linux.E.init(rc)) {
             .SUCCESS => return,
             .SRCH => return error.NoSuchProcess,
             else => unreachable,
@@ -226,8 +226,8 @@ pub usingnamespace if (@hasDecl(Arch, "SETREGS")) struct {
 
 pub fn getSigInfo(pid: Pid) NoSuchProcessError!SigInfo {
     var siginfo: SigInfo = undefined;
-    const rc = ptrace4(GETSIGINFO, pid, undefined, @ptrToInt(&siginfo));
-    switch (linux.getErrno(rc)) {
+    const rc = ptrace4(GETSIGINFO, pid, undefined, @intFromPtr(&siginfo));
+    switch (linux.E.init(rc)) {
         .SUCCESS => return siginfo,
         .SRCH => return error.NoSuchProcess,
         else => unreachable,
@@ -236,7 +236,7 @@ pub fn getSigInfo(pid: Pid) NoSuchProcessError!SigInfo {
 
 pub const SetOptionsError = error{ InvalidOption, NoSuchProcess };
 pub fn setOptions(pid: Pid, options: Options) SetOptionsError!void {
-    switch (linux.getErrno(ptrace4(SETOPTIONS, pid, undefined, @intCast(usize, options)))) {
+    switch (linux.E.init(ptrace4(SETOPTIONS, pid, undefined, @intCast(options)))) {
         .SUCCESS => return,
         .INVAL => return error.InvalidOption,
         .SRCH => return error.NoSuchProcess,
@@ -246,7 +246,7 @@ pub fn setOptions(pid: Pid, options: Options) SetOptionsError!void {
 
 pub fn cont(pid: Pid, sig: Signal) RestartError!void {
     const rc = ptrace4(CONT, pid, undefined, sig);
-    switch (linux.getErrno(rc)) {
+    switch (linux.E.init(rc)) {
         .SUCCESS => return,
         .IO => return error.InvalidSignal,
         .SRCH => return error.NoSuchProcess,
@@ -256,7 +256,7 @@ pub fn cont(pid: Pid, sig: Signal) RestartError!void {
 
 pub fn syscall(pid: Pid, sig: Signal) RestartError!void {
     const rc = ptrace4(SYSCALL, pid, undefined, sig);
-    switch (linux.getErrno(rc)) {
+    switch (linux.E.init(rc)) {
         .SUCCESS => return,
         .IO => return error.InvalidSignal,
         .SRCH => return error.NoSuchProcess,
@@ -267,7 +267,7 @@ pub fn syscall(pid: Pid, sig: Signal) RestartError!void {
 pub const AttachError = error{ NotPermitted, NoSuchProcess };
 pub fn attach(pid: Pid) AttachError!void {
     const rc = ptrace2(ATTACH, pid);
-    switch (linux.getErrno(rc)) {
+    switch (linux.E.init(rc)) {
         .SUCCESS => return,
         .PERM => return error.NotPermitted,
         .SRCH => return error.NoSuchProcess,
@@ -277,8 +277,8 @@ pub fn attach(pid: Pid) AttachError!void {
 
 pub const SeizeError = error{ InvalidOption, NotPermitted, NoSuchProcess };
 pub fn seize(pid: Pid, options: Options) SeizeError!void {
-    const rc = ptrace4(SEIZE, pid, 0, @intCast(usize, options));
-    switch (linux.getErrno(rc)) {
+    const rc = ptrace4(SEIZE, pid, 0, @intCast(options));
+    switch (linux.E.init(rc)) {
         .SUCCESS => return,
         .INVAL => return error.InvalidOption,
         .PERM => return error.NotPermitted,
@@ -289,7 +289,7 @@ pub fn seize(pid: Pid, options: Options) SeizeError!void {
 
 pub fn detach(pid: Pid, sig: Signal) RestartError!void {
     const rc = ptrace4(DETACH, pid, undefined, sig);
-    switch (linux.getErrno(rc)) {
+    switch (linux.E.init(rc)) {
         .SUCCESS => return,
         .IO => return error.InvalidSignal,
         .SRCH => return error.NoSuchProcess,

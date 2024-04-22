@@ -24,7 +24,7 @@ pub fn replaceBasename(buffer: []u8, original: []const u8, replacement: []const 
 
 pub fn arrayInit(comptime T: type, val: @typeInfo(T).Array.child) T {
     var arr: T = undefined;
-    inline for (arr) |*el| {
+    inline for (&arr) |*el| {
         el.* = val;
     }
     return arr;
@@ -45,7 +45,7 @@ fn isInt(value: anytype) bool {
 pub fn intDeclToString(comptime Namespace: type, value: anytype) ?[]const u8 {
     inline for (@typeInfo(Namespace).Struct.decls) |decl| {
         if (comptime isInt(@field(Namespace, decl.name)))
-            if (@intCast(@TypeOf(value), @field(Namespace, decl.name)) == value)
+            if (@as(@TypeOf(value), @intCast(@field(Namespace, decl.name))) == value)
                 return decl.name;
     }
     return null;
@@ -69,7 +69,7 @@ test "intDeclToString" {
     );
     try std.testing.expectEqualStrings(
         "TWO",
-        intDeclToString(test_namespace, @intCast(u32, test_namespace.TWO)).?,
+        intDeclToString(test_namespace, @as(u32, @intCast(test_namespace.TWO))).?,
     );
     try std.testing.expectEqual(
         @as(?[]const u8, null),
@@ -82,7 +82,7 @@ pub fn maxDeclNameLen(comptime Namespace: type, comptime pred: DeclPred) usize {
     var max_len: usize = 0;
     inline for (@typeInfo(Namespace).Struct.decls) |decl| {
         if (pred(Namespace, decl.name))
-            max_len = @maximum(max_len, decl.name.len);
+            max_len = @max(max_len, decl.name.len);
     }
     return max_len;
 }
@@ -90,7 +90,7 @@ pub fn maxDeclNameLen(comptime Namespace: type, comptime pred: DeclPred) usize {
 pub fn maxFieldNameLen(comptime T: type) usize {
     var max_len: usize = 0;
     inline for (@typeInfo(T).Struct.fields) |field| {
-        max_len = @maximum(max_len, field.name.len);
+        max_len = @max(max_len, field.name.len);
     }
     return max_len;
 }
@@ -99,7 +99,7 @@ pub fn maxDeclValue(comptime Namespace: type) usize {
     var max_val: usize = 0;
     inline for (@typeInfo(Namespace).Struct.decls) |decl| {
         if (comptime isInt(@field(Namespace, decl.name)))
-            max_val = @maximum(max_val, @field(Namespace, decl.name));
+            max_val = @max(max_val, @field(Namespace, decl.name));
     }
     return max_val;
 }
@@ -149,18 +149,18 @@ pub fn FieldType(comptime T: type, comptime field: []const u8) type {
 }
 
 pub const Signal = u6;
-pub const SignalAction = fn (Signal, *const std.os.siginfo_t) void;
+pub const SignalAction = fn (Signal, *const std.posix.siginfo_t) void;
 pub fn setSignalAction(signal: Signal, comptime handler: SignalAction) !void {
     const Closure = struct {
-        fn sigaction(sig: c_int, info: *const std.os.siginfo_t, ucontext: ?*const anyopaque) callconv(.C) void {
+        fn sigaction(sig: c_int, info: *const std.posix.siginfo_t, ucontext: ?*const anyopaque) callconv(.C) void {
             _ = ucontext;
-            handler(@intCast(Signal, sig), info);
+            handler(@intCast(sig), info);
         }
     };
-    const sigaction = std.os.Sigaction{
+    const sigaction = std.posix.Sigaction{
         .handler = .{ .sigaction = Closure.sigaction },
         .mask = std.os.linux.empty_sigset,
         .flags = std.os.linux.SA.SIGINFO,
     };
-    try std.os.sigaction(signal, &sigaction, null);
+    try std.posix.sigaction(signal, &sigaction, null);
 }

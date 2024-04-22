@@ -1,82 +1,104 @@
 const std = @import("std");
+const Build = std.Build;
+const Compile = Build.Step.Compile;
+const Module = Build.Module;
 
-// this package is used for building the test/sample programs
-const ptrace_package = std.build.Pkg{
-    .name = "ptrace",
-    .source = .{ .path = "src/main.zig" },
+const Import = struct {
+    name: []const u8,
+    module: *Module,
 };
-const utils_package = std.build.Pkg{
-    .name = "utils",
-    .source = .{ .path = "src/utils.zig" },
-};
+
+fn addImports(compilation: *Compile, imports: []const Import) void {
+    for (imports) |import| {
+        compilation.root_module.addImport(import.name, import.module);
+    }
+}
 
 const ExeHelper = struct {
-    mode: std.builtin.Mode,
-    target: std.zig.CrossTarget,
-    package: std.build.Pkg,
-    builder: *std.build.Builder,
-    fn addExe(self: @This(), name: []const u8, root_src: []const u8) *std.build.LibExeObjStep {
-        const exe = self.builder.addExecutable(name, root_src);
-        exe.addPackage(self.package);
-        exe.setBuildMode(self.mode);
-        exe.setTarget(self.target);
-        exe.install();
+    optimize: std.builtin.Mode,
+    target: Build.ResolvedTarget,
+    imports: []const Import,
+    builder: *std.Build,
+
+    fn addExe(self: @This(), name: []const u8, root_src: []const u8) *Compile {
+        const exe = self.builder.addExecutable(.{
+            .name = name,
+            .root_source_file = self.builder.path(root_src),
+            .target = self.target,
+            .optimize = self.optimize,
+        });
+        addImports(exe, self.imports);
+        self.builder.installArtifact(exe);
         return exe;
     }
-    fn addPayload(self: @This(), name: []const u8, root_src: []const u8) *std.build.LibExeObjStep {
-        const obj = self.builder.addObject(name, root_src);
-        obj.addPackage(self.package);
-        obj.setBuildMode(.ReleaseFast);
-        obj.setTarget(self.target);
-        obj.single_threaded = true;
-        obj.strip = true;
-        obj.code_model = .small;
+
+    fn addPayload(self: @This(), name: []const u8, root_src: []const u8) *Compile {
+        const obj = self.builder.addObject(.{
+            .name = name,
+            .root_source_file = self.builder.path(root_src),
+            .target = self.target,
+            .optimize = .ReleaseSmall,
+        });
+        addImports(obj, self.imports);
+        obj.root_module.single_threaded = true;
+        obj.root_module.strip = true;
+        obj.root_module.code_model = .small;
         return obj;
+    }
+
+    fn addTest(self: @This(), root_src: []const u8) *Compile {
+        const tst = self.builder.addTest(.{
+            .root_source_file = self.builder.path(root_src),
+            .target = self.target,
+            .optimize = self.optimize,
+        });
+        addImports(tst, self.imports);
+        return tst;
     }
 };
 
-pub fn build(b: *std.build.Builder) void {
-    // my code confuses stage 1 and we should be moving away from it anyways
-    b.use_stage1 = false;
-
-    // Standard release options allow the person running `zig build` to select
-    // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
-    const mode = b.standardReleaseOptions();
+pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
-    const helper = ExeHelper{ .mode = mode, .target = target, .package = ptrace_package, .builder = b };
+    const optimize = b.standardOptimizeOption(.{});
 
-    const tracer = b.addExecutable("tracer", "test/tracer.zig");
-    tracer.addPackage(ptrace_package);
-    tracer.addPackage(utils_package);
-    tracer.setBuildMode(mode);
-    tracer.setTarget(target);
-    tracer.install();
+    const utils = b.createModule(.{
+        .root_source_file = b.path("src/utils.zig"),
+    });
+    const elf_file = b.createModule(.{
+        .root_source_file = b.path("src/ElfFile.zig"),
+    });
 
-    const tracee = b.addExecutable("tracee", "test/tracee.zig");
-    tracee.addPackage(ptrace_package);
-    tracee.addPackage(utils_package);
-    tracee.setBuildMode(mode);
-    tracee.setTarget(target);
-    tracee.install();
+    const ptrace = b.addModule("ptrace", .{
+        .root_source_file = b.path("src/main.zig"),
+    });
+    ptrace.addImport("utils", utils);
+    ptrace.addImport("ElfFile", elf_file);
 
-    const threaded = helper.addExe("threaded", "test/threaded.zig");
-    _ = threaded;
+    const helper = ExeHelper{
+        .optimize = optimize,
+        .target = target,
+        .imports = &[_]Import{
+            .{ .name = "ptrace", .module = ptrace },
+            .{ .name = "utils", .module = utils },
+        },
+        .builder = b,
+    };
+
+    const tracer = helper.addExe("tracer", "test/tracer.zig");
+    const tracee = helper.addExe("tracee", "test/tracee.zig");
+
+    _ = helper.addExe("threaded", "test/threaded.zig");
+
     const raise_before_stop = helper.addExe("raise_before_stop", "test/raise_signal_before_stop.zig");
-    raise_before_stop.single_threaded = true;
-    raise_before_stop.addPackage(utils_package);
-    const handle_before_stop = helper.addExe("handle_before_stop", "test/handle_signal_before_stop.zig");
-    handle_before_stop.addPackage(utils_package);
-
-    const echo = helper.addExe("echo", "test/echo.zig");
-    _ = echo;
+    raise_before_stop.root_module.single_threaded = true;
+    _ = helper.addExe("handle_before_stop", "test/handle_signal_before_stop.zig");
+    _ = helper.addExe("echo", "test/echo.zig");
 
     const inject_hello = helper.addExe("injector", "test/inject_hello.zig");
 
     const hello_payload = helper.addPayload("hello_world", "test/payloads/hello_world.zig");
-    hello_payload.addPackage(utils_package);
-    hello_payload.setBuildMode(.ReleaseSmall);
-    const inject_step = std.build.RunStep.create(b, "run injector");
-    inject_step.addArtifactArg(inject_hello);
+
+    const inject_step = b.addRunArtifact(inject_hello);
     inject_step.addArtifactArg(hello_payload);
     if (b.args) |args| {
         if (args.len >= 1)
@@ -85,35 +107,35 @@ pub fn build(b: *std.build.Builder) void {
 
     const embed_object_name = "snippets.o";
     const embed_object_path = "src/generated/" ++ embed_object_name;
-    const embed_package_path = "src/snippets.zig";
-    const embed_package = std.build.Pkg{
-        .name = "artifacts",
-        .source = .{ .path = embed_package_path },
-    };
     const snippets_root = helper.addPayload("snippets", "src/snippets.zig");
+
+    const embed_module = &snippets_root.root_module;
+    embed_module.addImport("ElfFile", elf_file);
+    ptrace.addImport("embed", embed_module);
+
     const cp_tool = b.addSystemCommand(&[_][]const u8{"cp"});
     cp_tool.addArtifactArg(snippets_root);
     cp_tool.addArg(embed_object_path);
 
-    inject_hello.addPackage(embed_package);
+    inject_hello.root_module.addImport("embed", embed_module);
     inject_hello.step.dependOn(&cp_tool.step);
 
     const inject_run_step = b.step("inject", "Inject the 'Hello World' payload into the target process");
     inject_run_step.dependOn(&inject_step.step);
 
-    const runner_step = std.build.RunStep.create(b, "run tracer");
-    runner_step.addArtifactArg(tracer);
+    const runner_step = b.addRunArtifact(tracer);
     runner_step.addArtifactArg(tracee);
 
     const run_step = b.step("run", "Run the tracer program");
     run_step.dependOn(&runner_step.step);
 
-    const main_tests = b.addTest("src/main.zig");
-    main_tests.setBuildMode(mode);
-    main_tests.setTarget(target);
-    main_tests.addPackage(embed_package);
+    const main_tests = helper.addTest("src/main.zig");
+    main_tests.root_module.addImport("embed", embed_module);
+    main_tests.root_module.addImport("ElfFile", elf_file);
     main_tests.step.dependOn(&cp_tool.step);
 
+    const run_main_tests = b.addRunArtifact(main_tests);
+
     const test_step = b.step("test", "Run library tests");
-    test_step.dependOn(&main_tests.step);
+    test_step.dependOn(&run_main_tests.step);
 }

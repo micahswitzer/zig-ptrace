@@ -3,7 +3,7 @@ const pt = @import("ptrace.zig");
 const ll = @import("lowlevel.zig");
 
 const linux = std.os.linux;
-const os = std.os;
+const os = std.posix;
 
 const Options = pt.Options;
 const Pid = pt.Pid;

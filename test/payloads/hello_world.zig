@@ -1,7 +1,12 @@
 const std = @import("std");
-const inject = @import("ptrace").inject;
-const Result = inject.PayloadResult;
 const utils = @import("utils");
+
+const Result = enum(c_int) {
+    success,
+    success_unload,
+    error_unload,
+    error_terminate,
+};
 
 export fn entry(load_addr: usize) callconv(.C) Result {
     _ = load_addr;
