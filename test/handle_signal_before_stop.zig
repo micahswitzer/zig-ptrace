@@ -12,7 +12,7 @@ pub fn main() !void {
     defer std.process.argsFree(alloc, args);
 
     const subprocess_args: [1][]const u8 = .{args[1]};
-    var process = std.ChildProcess.init(&subprocess_args, alloc);
+    var process = std.process.Child.init(&subprocess_args, alloc);
     try process.spawn();
     errdefer {
         _ = process.kill() catch {};

@@ -126,7 +126,7 @@ pub const ThreadStatus = struct {
                 continue;
             }
 
-            var parts = std.mem.split(u8, line, ":\t");
+            var parts = std.mem.splitSequence(u8, line, ":\t");
             const name = parts.next() orelse continue;
             const pid_str = parts.rest();
             if (pid_str.len == 0) continue;

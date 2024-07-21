@@ -31,7 +31,7 @@ pub const MapEntry = struct {
         minor: u8,
 
         pub fn parse(device: []const u8) !Device {
-            var devIt = std.mem.split(u8, device, ":");
+            var devIt = std.mem.splitScalar(u8, device, ':');
             return Device{
                 .major = try std.fmt.parseInt(u8, devIt.next() orelse return error.BadDevice, 10),
                 .minor = try std.fmt.parseInt(u8, devIt.next() orelse return error.BadDevice, 10),
@@ -49,14 +49,14 @@ pub const MapEntry = struct {
 
     /// Requires `line` to live as long as the returned `MapEntry`
     pub fn parse(line: []const u8) !Self {
-        var it = std.mem.tokenize(u8, line, " ");
+        var it = std.mem.tokenizeSequence(u8, line, " ");
         const addrTok = try getNext(&it);
         const permsTok = try getNext(&it);
         const offsetTok = try getNext(&it);
         const deviceTok = try getNext(&it);
         const inodeTok = try getNext(&it);
         const path = it.next();
-        var addrIt = std.mem.split(u8, addrTok, "-");
+        var addrIt = std.mem.splitScalar(u8, addrTok, '-');
 
         return Self{
             .start = try std.fmt.parseInt(usize, addrIt.next() orelse return error.BadAddress, 16),
