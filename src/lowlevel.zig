@@ -40,11 +40,11 @@ pub const Thread = struct {
 
         pub fn fromStatus(status: u32) State {
             if (os.W.IFSTOPPED(status))
-                return State{ .Stopped = os.W.STOPSIG(status) };
+                return .{ .Stopped = os.W.STOPSIG(status) };
             if (os.W.IFSIGNALED(status))
-                return State{ .Terminated = os.W.TERMSIG(status) };
+                return .{ .Terminated = os.W.TERMSIG(status) };
             if (os.W.IFEXITED(status))
-                return State{ .Exited = os.W.EXITSTATUS(status) };
+                return .{ .Exited = os.W.EXITSTATUS(status) };
             unreachable;
         }
     };
@@ -410,11 +410,11 @@ pub fn traceMeAndStop() !void {
 }
 
 pub fn threadFromTraceme(tid: Pid) Thread {
-    return Thread{ .id = tid, .state = .Running };
+    return .{ .id = tid, .state = .Running };
 }
 
 pub fn attachThread(tid: Pid) !Thread {
-    var thread = Thread{ .id = tid };
+    var thread: Thread = .{ .id = tid };
     try thread.attachUnchecked();
     return thread;
 }

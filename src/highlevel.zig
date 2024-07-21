@@ -146,7 +146,7 @@ pub const ManagedThread = struct {
 
     pub fn attachPid(pid: Pid) !Self {
         try pt.attach(pid);
-        return Self{
+        return .{
             .pid = pid,
             .tid = pid,
             .state = .Running,
@@ -155,7 +155,7 @@ pub const ManagedThread = struct {
 
     pub fn attachSpawned(program: [*:0]const u8) !Self {
         const pid = try spawn(program, true, true);
-        var thread = Self{
+        var thread: Self = .{
             .pid = pid,
             .tid = pid,
             .state = .Running,

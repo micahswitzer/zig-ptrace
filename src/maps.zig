@@ -18,7 +18,7 @@ pub const MapEntry = struct {
 
     fn parsePermissions(perms: []const u8) !Permissions {
         try std.testing.expectEqual(@as(usize, 4), perms.len);
-        return Permissions{
+        return .{
             .read = perms[0] == 'r',
             .write = perms[1] == 'w',
             .execute = perms[2] == 'x',
@@ -32,7 +32,7 @@ pub const MapEntry = struct {
 
         pub fn parse(device: []const u8) !Device {
             var devIt = std.mem.splitScalar(u8, device, ':');
-            return Device{
+            return .{
                 .major = try std.fmt.parseInt(u8, devIt.next() orelse return error.BadDevice, 10),
                 .minor = try std.fmt.parseInt(u8, devIt.next() orelse return error.BadDevice, 10),
             };
@@ -58,7 +58,7 @@ pub const MapEntry = struct {
         const path = it.next();
         var addrIt = std.mem.splitScalar(u8, addrTok, '-');
 
-        return Self{
+        return .{
             .start = try std.fmt.parseInt(usize, addrIt.next() orelse return error.BadAddress, 16),
             .end = try std.fmt.parseInt(usize, addrIt.next() orelse return error.BadAddress, 16),
             .permissions = try parsePermissions(permsTok),
@@ -106,7 +106,7 @@ test "parse system maps" {
 
 test "parse line with path" {
     const LINE = "56523759d000-5652375bd000 r--p 00000000 103:05 2361465                   /usr/bin/bash";
-    const expected = MapEntry{
+    const expected: MapEntry = .{
         .start = 0x56523759d000,
         .end = 0x5652375bd000,
         .permissions = .{ .read = true, .private = true },
@@ -121,7 +121,7 @@ test "parse line with path" {
 
 test "parse line without path" {
     const LINE = "56523759d000-5652375bd000 r-xp 00000000 103:05 2361465";
-    const expected = MapEntry{
+    const expected: MapEntry = .{
         .start = 0x56523759d000,
         .end = 0x5652375bd000,
         .permissions = .{ .read = true, .execute = true, .private = true },

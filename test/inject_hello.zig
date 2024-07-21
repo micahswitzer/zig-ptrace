@@ -46,13 +46,13 @@ pub fn main() !void {
     const payload_elf = try ptrace.ElfFile.fromMemory(payload_mapped);
 
     log.info("Finding executable segments", .{});
-    const payload_exe = blk: {
+    const payload_exe: RegionInfo = blk: {
         // first look through the program headers
         if (payload_elf.program_headers) |phdrs|
             for (phdrs) |phdr| {
                 if (phdr.p_flags & elf.PF_X == 0 or phdr.p_type & elf.PT_LOAD == 0)
                     continue;
-                break :blk RegionInfo{
+                break :blk .{
                     .file_bytes = payload_mapped[phdr.p_offset .. phdr.p_offset + phdr.p_filesz],
                     .mem_size = phdr.p_memsz,
                     .load_addr = phdr.p_vaddr,
@@ -63,7 +63,7 @@ pub fn main() !void {
             for (shdrs) |shdr| {
                 if (shdr.sh_flags & sh_flags != sh_flags or shdr.sh_type != elf.SHT_PROGBITS)
                     continue;
-                break :blk RegionInfo{
+                break :blk .{
                     .file_bytes = payload_mapped[shdr.sh_offset .. shdr.sh_offset + shdr.sh_size],
                     .mem_size = shdr.sh_size,
                     .load_addr = shdr.sh_addr,

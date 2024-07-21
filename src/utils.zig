@@ -157,7 +157,7 @@ pub fn setSignalAction(signal: Signal, comptime handler: SignalAction) !void {
             handler(@intCast(sig), info);
         }
     };
-    const sigaction = std.posix.Sigaction{
+    const sigaction: std.posix.Sigaction = .{
         .handler = .{ .sigaction = Closure.sigaction },
         .mask = std.os.linux.empty_sigset,
         .flags = std.os.linux.SA.SIGINFO,

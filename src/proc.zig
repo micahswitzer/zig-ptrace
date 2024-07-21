@@ -92,7 +92,7 @@ pub const TaskDir = struct {
     }
 
     pub fn iterate(self: @This()) Iterator {
-        return Iterator{ .iter = self.dir.iterate() };
+        return .{ .iter = self.dir.iterate() };
     }
 };
 
@@ -196,17 +196,17 @@ pub const ProcDir = struct {
     };
 
     fn getFile(self: @This(), path: [*:0]const u8) !File {
-        return File{
+        return .{
             .handle = try std.posix.openatZ(self.fd, path, OPEN_FILE_FLAGS, 0),
         };
     }
 
     fn getFileWritable(self: @This(), path: [*:0]const u8) !File {
-        return File{
+        return .{
             .handle = try std.posix.openatZ(
                 self.fd,
                 path,
-                std.posix.O{ .ACCMODE = .RDWR, .CLOEXEC = true },
+                .{ .ACCMODE = .RDWR, .CLOEXEC = true },
                 0,
             ),
         };
@@ -239,10 +239,9 @@ pub const ProcDir = struct {
     }
 
     pub fn getTasksDir(self: @This()) !TaskDir {
-        const dir = IterableDir{
-            .dir = .{ .fd = try std.posix.openatZ(self.fd, TASKS, OPEN_DIR_FLAGS, 0) },
-        };
-        return TaskDir{ .dir = dir };
+        return .{ .dir = .{ .dir = .{
+            .fd = try std.posix.openatZ(self.fd, TASKS, OPEN_DIR_FLAGS, 0),
+        } } };
     }
 
     pub fn getStatus(self: @This()) !ThreadStatus {

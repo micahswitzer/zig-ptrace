@@ -74,7 +74,7 @@ pub fn build(b: *std.Build) void {
     ptrace.addImport("utils", utils);
     ptrace.addImport("ElfFile", elf_file);
 
-    const helper = ExeHelper{
+    const helper: ExeHelper = .{
         .optimize = optimize,
         .target = target,
         .imports = &[_]Import{
