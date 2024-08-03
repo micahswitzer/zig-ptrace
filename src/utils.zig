@@ -150,7 +150,7 @@ pub fn FieldType(comptime T: type, comptime field: []const u8) type {
 
 pub const Signal = u6;
 pub const SignalAction = fn (Signal, *const std.posix.siginfo_t) void;
-pub fn setSignalAction(signal: Signal, comptime handler: SignalAction) !void {
+pub fn setSignalAction(signal: Signal, comptime handler: SignalAction) void {
     const Closure = struct {
         fn sigaction(sig: c_int, info: *const std.posix.siginfo_t, ucontext: ?*const anyopaque) callconv(.C) void {
             _ = ucontext;
@@ -162,5 +162,5 @@ pub fn setSignalAction(signal: Signal, comptime handler: SignalAction) !void {
         .mask = std.os.linux.empty_sigset,
         .flags = std.os.linux.SA.SIGINFO,
     };
-    try std.posix.sigaction(signal, &sigaction, null);
+    std.posix.sigaction(signal, &sigaction, null);
 }

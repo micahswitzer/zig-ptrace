@@ -30,7 +30,7 @@ pub fn main() !void {
         .flags = std.os.linux.SA.SIGINFO,
         .restorer = null,
     };
-    try std.posix.sigaction(std.posix.SIG.INT, &new_action, null);
+    std.posix.sigaction(std.posix.SIG.INT, &new_action, null);
 
     defer {
         for (&threads, 0..) |*thread, i| {
