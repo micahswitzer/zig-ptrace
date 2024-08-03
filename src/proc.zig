@@ -150,19 +150,19 @@ pub const ThreadStatus = struct {
 
 test "parse ThreadStatus from buffer" {
     const sample_data =
-        \\Name:	init
-        \\Umask:	0022
-        \\State:	S (sleeping)
-        \\Tgid:	1
-        \\Ngid:	0
-        \\Pid:	7
-        \\PPid:	0
-        \\TracerPid:	0
-        \\Uid:	0	0	0	0
-        \\Gid:	0	0	0	0
-        \\FDSize:	128
-        \\Groups:
-        \\NStgid:	1
+        "Name:\tinit\n" ++
+        "Umask:\t0022\n" ++
+        "State:\tS (sleeping)\n" ++
+        "Tgid:\t1\n" ++
+        "Ngid:\t0\n" ++
+        "Pid:\t7\n" ++
+        "PPid:\t0\n" ++
+        "TracerPid:\t0\n" ++
+        "Uid:\t0\t0\t0\t0\n" ++
+        "Gid:\t0\t0\t0\t0\n" ++
+        "FDSize:\t128\n" ++
+        "Groups:\n" ++
+        "NStgid:\t1\n"
     ;
     var stream = std.io.fixedBufferStream(sample_data);
     const status = try ThreadStatus.fromReader(stream.reader());
