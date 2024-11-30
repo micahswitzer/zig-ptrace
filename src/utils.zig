@@ -22,7 +22,7 @@ pub fn replaceBasename(buffer: []u8, original: []const u8, replacement: []const 
     return std.meta.assumeSentinel(buffer[0..new_len], 0);
 }
 
-pub fn arrayInit(comptime T: type, val: @typeInfo(T).Array.child) T {
+pub fn arrayInit(comptime T: type, val: @typeInfo(T).array.child) T {
     var arr: T = undefined;
     inline for (&arr) |*el| {
         el.* = val;
@@ -32,18 +32,18 @@ pub fn arrayInit(comptime T: type, val: @typeInfo(T).Array.child) T {
 
 /// For an array type `T`, create an equivalent tuple
 /// with each element initialized with value `val`.
-pub fn UniformTuple(comptime T: type, comptime val: @typeInfo(T).Array.child) type {
+pub fn UniformTuple(comptime T: type, comptime val: @typeInfo(T).array.child) type {
     return std.meta.Tuple(&arrayInit(T, val));
 }
 
 fn isInt(value: anytype) bool {
     const T = @TypeOf(value);
     const ti = @typeInfo(T);
-    return ti == .Int or ti == .ComptimeInt;
+    return ti == .int or ti == .comptime_int;
 }
 
 pub fn intDeclToString(comptime Namespace: type, value: anytype) ?[]const u8 {
-    inline for (@typeInfo(Namespace).Struct.decls) |decl| {
+    inline for (@typeInfo(Namespace).@"struct".decls) |decl| {
         if (comptime isInt(@field(Namespace, decl.name)))
             if (@as(@TypeOf(value), @intCast(@field(Namespace, decl.name))) == value)
                 return decl.name;
@@ -80,7 +80,7 @@ test "intDeclToString" {
 pub const DeclPred = fn (comptime type, comptime []const u8) bool;
 pub fn maxDeclNameLen(comptime Namespace: type, comptime pred: DeclPred) usize {
     var max_len: usize = 0;
-    inline for (@typeInfo(Namespace).Struct.decls) |decl| {
+    inline for (@typeInfo(Namespace).@"struct".decls) |decl| {
         if (pred(Namespace, decl.name))
             max_len = @max(max_len, decl.name.len);
     }
@@ -89,7 +89,7 @@ pub fn maxDeclNameLen(comptime Namespace: type, comptime pred: DeclPred) usize {
 
 pub fn maxFieldNameLen(comptime T: type) usize {
     var max_len: usize = 0;
-    inline for (@typeInfo(T).Struct.fields) |field| {
+    inline for (@typeInfo(T).@"struct".fields) |field| {
         max_len = @max(max_len, field.name.len);
     }
     return max_len;
@@ -97,7 +97,7 @@ pub fn maxFieldNameLen(comptime T: type) usize {
 
 pub fn maxDeclValue(comptime Namespace: type) usize {
     var max_val: usize = 0;
-    inline for (@typeInfo(Namespace).Struct.decls) |decl| {
+    inline for (@typeInfo(Namespace).@"struct".decls) |decl| {
         if (comptime isInt(@field(Namespace, decl.name)))
             max_val = @max(max_val, @field(Namespace, decl.name));
     }

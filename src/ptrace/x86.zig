@@ -79,7 +79,7 @@ pub const UserRegs = switch (builtin.cpu.arch) {
         }
         pub fn getArgs(self: @This()) Args {
             var res: Args = undefined;
-            inline for (@typeInfo(@TypeOf(args)).Struct.fields) |field| {
+            inline for (@typeInfo(@TypeOf(args)).@"struct".fields) |field| {
                 @field(res, field.name) = @field(self, @field(args, field.name));
             }
             return res;
@@ -95,7 +95,7 @@ pub const UserRegs = switch (builtin.cpu.arch) {
             self.rax = @intFromEnum(sys);
         }
         pub fn setArgs(self: *@This(), arg_values: Args) void {
-            inline for (@typeInfo(@TypeOf(args)).Struct.fields) |field| {
+            inline for (@typeInfo(@TypeOf(args)).@"struct".fields) |field| {
                 @field(self, @field(args, field.name)) = @field(arg_values, field.name);
             }
         }

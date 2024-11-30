@@ -103,7 +103,7 @@ pub const ThreadStatus = struct {
     PPid: Pid,
     TracerPid: Pid,
 
-    const NUM_FIELDS = @typeInfo(@This()).Struct.fields.len;
+    const NUM_FIELDS = @typeInfo(@This()).@"struct".fields.len;
     const MAX_NAME_LEN = utils.maxFieldNameLen(@This());
     const BUFFER_SIZE = MAX_NAME_LEN + 2 + PID_MAX_CHARS + 2;
 
@@ -131,7 +131,7 @@ pub const ThreadStatus = struct {
             const pid_str = parts.rest();
             if (pid_str.len == 0) continue;
 
-            inline for (@typeInfo(@This()).Struct.fields) |field| {
+            inline for (@typeInfo(@This()).@"struct".fields) |field| {
                 if (std.mem.eql(u8, field.name, name)) {
                     @field(status, field.name) = try std.fmt.parseInt(Pid, pid_str, 10);
                     fields_remaining -= 1;
@@ -162,8 +162,7 @@ test "parse ThreadStatus from buffer" {
         "Gid:\t0\t0\t0\t0\n" ++
         "FDSize:\t128\n" ++
         "Groups:\n" ++
-        "NStgid:\t1\n"
-    ;
+        "NStgid:\t1\n";
     var stream = std.io.fixedBufferStream(sample_data);
     const status = try ThreadStatus.fromReader(stream.reader());
     try std.testing.expectEqual(ThreadStatus{
