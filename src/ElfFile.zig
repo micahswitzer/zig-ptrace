@@ -25,7 +25,9 @@ strings: ?[:0]const u8,
 rel: ?[]const elf.Rel,
 rela: ?[]const elf.Rela,
 
-pub fn fromMemory(storage: Storage) !@This() {
+const ElfFile = @This();
+
+pub fn fromMemory(storage: Storage) !ElfFile {
     const hdr: *const elf.Ehdr = @ptrCast(storage);
     if (!std.mem.eql(u8, hdr.e_ident[0..4], elf.MAGIC))
         return error.InvalidElfMagic;
@@ -142,13 +144,13 @@ pub fn fromMemory(storage: Storage) !@This() {
     };
 }
 
-pub fn getString(self: @This(), index: usize) ?[:0]const u8 {
+pub fn getString(self: ElfFile, index: usize) ?[:0]const u8 {
     if (self.strings == null or index == 0 or index > self.strings.?.len)
         return null;
     return std.mem.sliceTo(self.strings.?[index..], 0);
 }
 
-pub fn getFnOffset(self: @This(), name: []const u8) ?usize {
+pub fn getFnOffset(self: ElfFile, name: []const u8) ?usize {
     if (self.section_headers == null or self.symbols == null or self.strings == null)
         return null;
     for (self.symbols.?) |sym| {
@@ -162,7 +164,7 @@ pub fn getFnOffset(self: @This(), name: []const u8) ?usize {
     return null;
 }
 
-pub fn getSymbol(self: @This(), name: []const u8, sym_type: u4) ?[]const u8 {
+pub fn getSymbol(self: ElfFile, name: []const u8, sym_type: u4) ?[]const u8 {
     if (self.section_headers == null or self.symbols == null or self.strings == null)
         return null;
     for (self.symbols.?) |sym| {
@@ -179,16 +181,16 @@ pub fn getSymbol(self: @This(), name: []const u8, sym_type: u4) ?[]const u8 {
     return null;
 }
 
-pub fn getFn(self: @This(), name: []const u8) ?[]const u8 {
+pub fn getFn(self: ElfFile, name: []const u8) ?[]const u8 {
     return self.getSymbol(name, elf.STT_FUNC);
 }
 
-fn comptimeFnSize(comptime self: @This(), comptime name: []const u8) usize {
+fn comptimeFnSize(comptime self: ElfFile, comptime name: []const u8) usize {
     return (self.getFn(name) orelse unreachable).len;
 }
 /// this copies the function contents outside of the object file so that the
 /// whole object doesn't need to be included in the output binary
-pub inline fn comptimeFn(comptime self: @This(), comptime name: []const u8) *const [self.comptimeFnSize(name)]u8 {
+pub inline fn comptimeFn(comptime self: ElfFile, comptime name: []const u8) *const [self.comptimeFnSize(name)]u8 {
     comptime {
         const slice = self.getFn(name) orelse unreachable;
         return (&slice[0..slice.len]).*;
@@ -196,5 +198,5 @@ pub inline fn comptimeFn(comptime self: @This(), comptime name: []const u8) *con
 }
 
 test {
-    std.testing.refAllDecls(@This());
+    std.testing.refAllDecls(ElfFile);
 }
