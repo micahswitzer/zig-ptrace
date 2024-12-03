@@ -124,7 +124,7 @@ pub const Thread = struct {
 
     pub fn stopUnchecked(self: *Thread) !void {
         std.debug.assert(self.state == .Running);
-        const res = linux.tgkill(0, self.id, linux.SIG.STOP);
+        const res = linux.tgkill(self.id, self.id, linux.SIG.STOP);
         switch (linux.E.init(res)) {
             .SUCCESS => return,
             .AGAIN => unreachable,
